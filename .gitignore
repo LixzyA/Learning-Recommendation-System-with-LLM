@@ -1,0 +1,10 @@
+.env
+*.log
+*.sql
+*.sqlite
+*.db
+dataset/
+SPV-dataset/
+*.json
+weaviate_data/
+*.ipynb
