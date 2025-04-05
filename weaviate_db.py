@@ -6,6 +6,7 @@ import weaviate.classes as wvc
 from os import getenv
 import pandas as pd
 from dotenv import load_dotenv
+import numpy as np
 
 class Database:
     def __init__(self):
@@ -40,20 +41,20 @@ class Database:
     def delete_collection(self, collection:str):
         self.client.collections.delete(collection)
 
-    def ingest_data(self, Dataframe: pd.DataFrame, embedding_list: list):
+    def ingest_data(self, Dataframe: pd.DataFrame):
         """Ingest data into the current collection."""
         with self.collection.batch.dynamic() as batch:
             for idx, row in Dataframe.iterrows():
                 batch.add_object(
                     properties={
                         "name": row["title"],
-                        "content": row["weighted_content"],
+                        "content": row["content"],
                         "language": row["lang"],
                         "file_type": row['file_type'],
                         "url": row.get("url", ""),
-                        "obj_uuid": generate_uuid5(row["weighted_content"]),
+                        "obj_uuid": generate_uuid5(row["content"]),
                     },
-                    vector=embedding_list[idx]
+                    vector=row['embeddings']
                 )
         print("Success ingesting data")
 
@@ -89,7 +90,7 @@ if __name__ == "__main__":
     
     load_dotenv(dotenv_path=".env")
     with Database() as db:
-        collection_name = "Embeddings"
+        collection_name = "Embeddings_new_preprocess"
         # db.delete_collection(collection_name)
         db.create_or_get_collections(collection_name)
         agg_result = db.collection.aggregate.over_all(total_count=True)
