@@ -52,7 +52,6 @@ class W3cschoolsSpider(scrapy.Spider):
     custom_settings = {
         'DEPTH_LIMIT': 0,
         'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
-        'FILES_STORE': 'webpages',  # Directory to save pages
         'HTTPCACHE_ENABLED': True,
         'CONCURRENT_REQUESTS': 5,  # Limit to 5 concurrent requests
         'PLAYWRIGHT_MAX_PAGES_PER_CONTEXT': 10,  # Limit pages per context
@@ -65,12 +64,7 @@ class W3cschoolsSpider(scrapy.Spider):
                 meta={
                     "playwright": True,
                     "playwright_include_page": True,
-                    # "playwright_context": "browser_context",
-                    # "playwright_page_goto_kwargs": {
-                    #     "wait_until": "load",
-                    #     "timeout": 6000
-                    # },
-                    "playwright_page_init_coroutine": self.setup_block_media,  # 👈 Add this
+                    "playwright_page_init_coroutine": self.setup_block_media,
                     "errback": self.errback,
                     'DOWNLOAD_DELAY': 1,  # Wait 2 seconds between requests
                     'RANDOMIZE_DOWNLOAD_DELAY': True,  # Randomize the delay
@@ -117,12 +111,7 @@ class W3cschoolsSpider(scrapy.Spider):
                 meta={
                     "playwright": True,
                     "playwright_include_page": True,
-                    # "playwright_context": "browser_context",
-                    # "playwright_page_goto_kwargs": {
-                    #     "wait_until": "load",
-                    #     "timeout": 6000
-                    # },
-                    "playwright_page_init_coroutine": self.setup_block_media,  # 👈 Add this
+                    "playwright_page_init_coroutine": self.setup_block_media,
                     "errback": self.errback,
                     'DOWNLOAD_DELAY': 1,  # Wait 2 seconds between requests
                     'RANDOMIZE_DOWNLOAD_DELAY': True,  # Randomize the delay

@@ -92,31 +92,31 @@ ROBOTSTXT_OBEY = True
 REQUEST_FINGERPRINTER_IMPLEMENTATION = "2.7"
 TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 FEED_FORMAT = "json"
-FEED_URI = "tensorflow-new.json"  # Output filename
+FEED_URI = "tensorflow-new-fast-fast.json"  # Output filename
 FEED_EXPORT_ENCODING = "utf-8"  # For non-ASCII characters
 FEED_EXPORT_INDENT = 4  # Optional: Makes JSON human-readable
 
 ROBOTSTXT_OBEY = True  # Respect robots.txt rules
-DOWNLOAD_DELAY = 3     # Add 1 second delay between requests
-AUTOTHROTTLE_ENABLED = True
-
-# ITEM_PIPELINES = {
-#     'scrapy.pipelines.files.FilesPipeline': 1,
-#     # 'web_scraper.pipelines.HtmlSavePipeline': 300,
-#     # 'web_scraper.pipelines.AssetPipeline': 400,
-# }
+DOWNLOAD_DELAY = 0     
+AUTOTHROTTLE_ENABLED = False
 
 DUPEFILTER_CLASS = 'scrapy.dupefilters.RFPDupeFilter'
 
+# DOWNLOAD_HANDLERS = {
+#     "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+#     "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+# }
+DOWNLOADER_CLIENT_TLS_METHOD = 'TLSv1.2'  # Modern TLS
 DOWNLOAD_HANDLERS = {
-    "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-    "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+    'http': 'scrapy.core.downloader.handlers.http.HTTPDownloadHandler',
+    'https': 'scrapy.core.downloader.handlers.http.HTTPDownloadHandler',
 }
 
-TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 
-LOG_FILE = 'scrapy-new.log'
-LOG_LEVEL = 'DEBUG'  # Set to DEBUG for more detailed logs
-
-
-PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = 60000  # 60 seconds
+LOG_FILE = 'scrapy-new-fast-fast.log'
+LOG_LEVEL = 'INFO'
+RETRY_ENABLED = False
+CONCURRENT_REQUESTS = 100     # Max parallel requests
+CONCURRENT_REQUESTS_PER_DOMAIN = 50  # For a single domain
+REACTOR_THREADPOOL_MAXSIZE = 30  # Twisted thread pool size
+# PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = 60000  # 60 seconds

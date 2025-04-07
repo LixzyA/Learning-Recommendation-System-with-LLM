@@ -16,7 +16,7 @@ if __name__ == "__main__":
     print("Loading model and Database...")
     model = load_model()
     with Database() as db:
-        db.create_or_get_collections("Embeddings")
+        db.create_or_get_collections("Embeddings_new_preprocess")
         
         while True:
             query = input("Input sth you want to search: ").lower().strip()
@@ -24,7 +24,7 @@ if __name__ == "__main__":
                 break
 
             try:
-                query_embedding = model.encode(query, normalize_embeddings=True).tolist()
+                query_embedding = model.encode(query).tolist()
                 property = {"language": "en", "file_type": "pdf"}
 
                 results = db.search(query = query, query_embedding=query_embedding, 
