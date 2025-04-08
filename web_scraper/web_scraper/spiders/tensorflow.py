@@ -22,6 +22,10 @@ def extract_content(html: str):
     top_div = content_div.find('div', id='top')
     if top_div:
         top_div.decompose()
+
+    table_wrapper = content_div.find("div", _class = "devsite-table-wrapper")
+    if table_wrapper:
+        table_wrapper.decompose()
     
     # Extract text content (without HTML tags)
     text_content = content_div.get_text(separator='\n', strip=True)
@@ -31,15 +35,21 @@ class TensorflowSpider(scrapy.Spider):
     name = "tensorflow"
     allowed_domains = ["tensorflow.org"]
     start_urls = [
-                "https://www.tensorflow.org/api_docs/python/tf"
-                 ,"https://www.tensorflow.org/api_docs/cc"
-                #   ,"https://js.tensorflow.org/api/latest/"
+                # "https://www.tensorflow.org/api_docs/python/tf"
+                #  ,"https://www.tensorflow.org/api_docs/cc"
+                #   "https://www.tensorflow.org/tutorials",
+                #   "https://www.tensorflow.org/guide",
+                #   "https://www.tensorflow.org/tfx/tutorials",
+                #   "https://www.tensorflow.org/tfx/guide"
+                  "https://www.tensorflow.org/tutorials?hl=zh-cn",
+                  "https://www.tensorflow.org/guide?hl=zh-cn",
+                  "https://www.tensorflow.org/tfx/tutorials?hl=zh-cn",
+                  "https://www.tensorflow.org/tfx/guide?hl=zh-cn"
                   ]
     
     custom_settings = {
         'DEPTH_LIMIT': 0,
-        'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
-        # 'HTTPCACHE_ENABLED': True,
+        'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     }
 
     def start_requests(self):
@@ -48,16 +58,21 @@ class TensorflowSpider(scrapy.Spider):
                 url,
                 meta={
                     'is_start_url': True,  # Flag to identify start URLs
+                    'chinese': False,
                 },
                 callback=self.parse
             )
 
     def parse(self, response):
         if response.meta.get('is_start_url'):
-            if "python" in response.url:
-                links = response.css("li.devsite-nav-item a::attr(href)").getall()
-            else: #C++
+            if any(sub in response.url for sub in ("python", "tfx", "guide", "tutorials")) :
+                links = response.css("ul[menu='_book']>li.devsite-nav-item a::attr(href)").getall()
+            elif "/cc" in response.url: #C++
                 links = response.css("td>a::attr(href)").getall()
+            
+            if response.meta.get("chinese"):
+                links = [f'{link}?hl=zh-cn' for link in links]
+            
             
             for link in links:
                 yield response.follow(

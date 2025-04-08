@@ -92,7 +92,7 @@ ROBOTSTXT_OBEY = True
 REQUEST_FINGERPRINTER_IMPLEMENTATION = "2.7"
 TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 FEED_FORMAT = "json"
-FEED_URI = "tensorflow-new-fast-fast.json"  # Output filename
+FEED_URI = "pytorch-cn-extra.json"  # Output filename
 FEED_EXPORT_ENCODING = "utf-8"  # For non-ASCII characters
 FEED_EXPORT_INDENT = 4  # Optional: Makes JSON human-readable
 
@@ -113,10 +113,10 @@ DOWNLOAD_HANDLERS = {
 }
 
 
-LOG_FILE = 'scrapy-new-fast-fast.log'
+LOG_FILE = 'scrapy.log'
 LOG_LEVEL = 'INFO'
-RETRY_ENABLED = False
-CONCURRENT_REQUESTS = 100     # Max parallel requests
-CONCURRENT_REQUESTS_PER_DOMAIN = 50  # For a single domain
-REACTOR_THREADPOOL_MAXSIZE = 30  # Twisted thread pool size
+RETRY_ENABLED = True
+CONCURRENT_REQUESTS = 32 
+CONCURRENT_REQUESTS_PER_DOMAIN = 16
+REACTOR_THREADPOOL_MAXSIZE = 30  
 # PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = 60000  # 60 seconds

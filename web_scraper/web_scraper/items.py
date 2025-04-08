@@ -11,7 +11,6 @@ class WebPageItem(scrapy.Item):
     timestamp = scrapy.Field()
     title = scrapy.Field()
     source= scrapy.Field()
-    section_titles = scrapy.Field()
 
     def __repr__(self):
         # Exclude 'content' from the logged output

@@ -6,6 +6,7 @@
 dataset/
 SPV-dataset/
 *.json
+*.parquet
 weaviate_data/
 *.ipynb
 __pycache__/
