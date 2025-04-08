@@ -106,35 +106,6 @@ def get_embeddings(df):
     return content_embeddings
 
 
-# def get_embeddings(df):
-#     """Generate embeddings for text chunks with batching"""
-#     # Collect all chunks and track their content indices
-#     model = load_model_once()
-#     tokenizer = model.tokenizer
-#     all_chunk_texts = []
-#     content_indices = []
-#     for idx, content in enumerate(df['content']):
-#         token_ids = tokenizer.encode(content, add_special_tokens=False)
-#         chunks = [token_ids[i:i + 126] for i in range(0, len(token_ids), 126)]
-#         chunk_texts = [tokenizer.decode(chunk) for chunk in chunks]
-#         all_chunk_texts.extend(chunk_texts)
-#         content_indices.extend([idx] * len(chunk_texts))
-
-#     # Encode all chunks in one batch
-#     all_embeddings = model.encode(all_chunk_texts, convert_to_tensor=False, truncation=True)  # Returns numpy array
-
-#     # Compute average embedding per content
-#     content_embeddings = []
-#     for idx in range(len(df)):
-#         idx_mask = np.array(content_indices) == idx
-#         if idx_mask.any():
-#             content_embedding = np.mean(all_embeddings[idx_mask], axis=0)
-#         else:
-#             content_embedding = np.zeros(model.get_sentence_embedding_dimension())
-#         content_embeddings.append(content_embedding)
-#     return content_embeddings
-
-
 async def load_and_preprocess():
     geeksforgeeks, pytorch_cn, pytorch, scikit, spv_dataset, tensorflow, tensorflow_cn, w3cschools, w3schools = load_dataset()
     results = await asyncio.gather(
