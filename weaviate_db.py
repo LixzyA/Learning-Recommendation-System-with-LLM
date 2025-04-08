@@ -6,7 +6,9 @@ import weaviate.classes as wvc
 from os import getenv
 import pandas as pd
 from dotenv import load_dotenv
-import numpy as np
+# import numpy as np
+
+
 
 class Database:
     def __init__(self):
@@ -37,9 +39,16 @@ class Database:
             )
         else:
             self.collection = self.client.collections.get(collection)
+
+    def delete_auth(self, collection):
+        auth = input(f"Are you sure you want to delete {collection}? Y or N")
+        if auth.lower == 'y':
+            return True  
+        return False
     
     def delete_collection(self, collection:str):
-        self.client.collections.delete(collection)
+        if self.delete_auth(collection):
+            self.client.collections.delete(collection)
 
     def ingest_data(self, Dataframe: pd.DataFrame):
         """Ingest data into the current collection."""
@@ -90,18 +99,25 @@ if __name__ == "__main__":
     
     load_dotenv(dotenv_path=".env")
     with Database() as db:
-        collection_name = "Embeddings_new_preprocess"
-        # db.delete_collection(collection_name)
+        collection_name = getenv("WEAVIATE_DB")
         db.create_or_get_collections(collection_name)
-        agg_result = db.collection.aggregate.over_all(total_count=True)
 
-        # Check if the collection is filled or empty
-        if agg_result.total_count > 0:
-            print(f"The collection '{collection_name}' is filled with {agg_result.total_count} objects.")
-        else:
-            print(f"The collection '{collection_name}' is empty.")
+        print("""Menu:
+              1. Check number of object in a collection
+              2. Delete collection
+""")
+        user_input = int(input("Option: "))
+        if user_input == 1:
+            agg_result = db.collection.aggregate.over_all(total_count=True)
 
-        # db.search("Redis")
-        # db.client.collections.delete("Embeddings_2")
+            # Check if the collection is filled or empty
+            if agg_result.total_count > 0:
+                print(f"The collection '{collection_name}' is filled with {agg_result.total_count} objects.")
+            else:
+                print(f"The collection '{collection_name}' is empty.")
+
+        if user_input == 2:
+            db.delete_collection(collection_name)
+
 
 

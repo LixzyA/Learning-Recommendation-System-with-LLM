@@ -1,53 +1,28 @@
-from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 import torch
 import pandas as pd
-from weaviate_db import Database
-import pyarrow.parquet as pq
 import asyncio
-import linecache
 import numpy as np
-import tracemalloc
+from tqdm.auto import tqdm
 _model = None
 
-
-def display_top(snapshot, key_type='lineno', limit=10): #for debugging, remove in production
-    snapshot = snapshot.filter_traces((
-        tracemalloc.Filter(False, "<frozen importlib._bootstrap>"),
-        tracemalloc.Filter(False, "<unknown>"),
-    ))
-    top_stats = snapshot.statistics(key_type)
-
-    print("Top %s lines" % limit)
-    for index, stat in enumerate(top_stats[:limit], 1):
-        frame = stat.traceback[0]
-        print("#%s: %s:%s: %.1f KiB"
-              % (index, frame.filename, frame.lineno, stat.size / 1024))
-        line = linecache.getline(frame.filename, frame.lineno).strip()
-        if line:
-            print('    %s' % line)
-
-    other = top_stats[limit:]
-    if other:
-        size = sum(stat.size for stat in other)
-        print("%s other: %.1f KiB" % (len(other), size / 1024))
-    total = sum(stat.size for stat in top_stats)
-    print("Total allocated size: %.1f KiB" % (total / 1024))
-
-def load_dataset() -> pd.DataFrame:
+def load_dataset():
     try:
-        dir = 'dataset'
-        data1 = pd.read_csv(f'{dir}/supervisor-dataset-new.csv')
-        data2 = pd.read_json(f'{dir}/w3schools.json')
-        data3 = pd.read_json(f'{dir}/geeksforgeeks.json')
-        data4 = pd.read_json(f'{dir}/w3cschools.json')
-
+        geeksforgeeks = pd.read_json("dataset/geeksforgeeks.json")
+        pytorch_cn = pd.read_json("dataset/pytorch-cn-merged.json")
+        pytorch = pd.read_json("dataset/pytorch.json")
+        scikit = pd.read_json("dataset/scikit-learn.json")
+        spv_dataset = pd.read_csv("dataset/supervisor-dataset-new.csv")
+        tensorflow = pd.read_json("dataset/tensorflow_merged-en.json")
+        tensorflow_cn = pd.read_json("dataset/tensorflow-zh-cn.json")
+        w3cschools = pd.read_json("dataset/w3cschools.json")
+        w3schools = pd.read_json("dataset/w3schools.json")
+            
     except Exception as e:
         print(e)
 
-    return data1, data2, data3, data4
+    return geeksforgeeks, pytorch_cn, pytorch, scikit, spv_dataset, tensorflow, tensorflow_cn, w3cschools, w3schools
 
-tracemalloc.start()
 
 async def preprocess_spv_dataset(df) -> pd.DataFrame:
     for index in [3,37,38,46,55,56,71,79,80,81,83,85,87,89,94,95,96]:
@@ -55,28 +30,22 @@ async def preprocess_spv_dataset(df) -> pd.DataFrame:
     df =df.rename(columns={"name":"title"})
     return df
 
-async def preprocess_w3schools(df) -> pd.DataFrame:
-    df= df.drop(['timestamp', "Source"], axis =1)
-    df = df[~df['url'].str.contains('geeksforgeeks', na=False)]
-    df["lang"] = "en"
-    df['file_type'] = 'html'
-    return df
-    
-async def preprocess_geeksforgeeks(df: pd.DataFrame) -> pd.DataFrame:
-    df= df.drop(['timestamp', "Source"], axis =1)
-    # drop empty rows
-    df = df.dropna()
-    df= df[df['content'] != ""] # drop empty content rows
-    df["lang"] = "en"
-    df['file_type'] = 'html'
-    return df
+async def preprocess_dataframe(df:pd.DataFrame, column_to_drop: list, lang:str = 'en', file_type:str='html'):
+    """
+    Args:
+        df(pd.Dataframe): Dataframe to be preprocessed
+        column_to_drop(list): List of columns to be dropped
+        lang(str): Language of the dataframe, Either en or zh-cn
+        file_type(str): Type of the source of the dataframe
 
-async def preprocess_w3cschools(df: pd.DataFrame) -> pd.DataFrame:
+    Return:
+        df(pd.Dataframe): The cleaned dataframe
+    """
     df= df.dropna()
     df= df[df['content'] != ""] # drop empty content rows
-    df["lang"] = "zh-cn"
-    df['file_type'] = 'html'
-    df = df.drop(['timestamp', 'section_titles'], axis=1)
+    df = df.drop(column_to_drop, axis=1)
+    df['lang']= lang
+    df['file_type'] = file_type
     return df
 
 def load_model_once()-> SentenceTransformer:
@@ -91,60 +60,74 @@ def load_model() -> SentenceTransformer:
     model = model.to(device)
     return model
 
-
 def get_embeddings(df):
-    """Generate embeddings for text chunks with batching"""
-    # Collect all chunks and track their content indices
+    """Generate embeddings for text chunks with batching and progress tracking"""
     model = load_model_once()
     tokenizer = model.tokenizer
     all_chunk_texts = []
     content_indices = []
-    for idx, content in enumerate(df['content']):
+    
+    # Tokenize and chunk all content
+    print("Preprocessing content...")
+    for idx, content in tqdm(enumerate(df['content']), total=len(df), desc="Tokenizing"):
         token_ids = tokenizer.encode(content, add_special_tokens=False)
         chunks = [token_ids[i:i + 126] for i in range(0, len(token_ids), 126)]
         chunk_texts = [tokenizer.decode(chunk) for chunk in chunks]
         all_chunk_texts.extend(chunk_texts)
         content_indices.extend([idx] * len(chunk_texts))
 
-    # Encode all chunks in one batch
-    all_embeddings = model.encode(all_chunk_texts, convert_to_tensor=False, truncation=True)  # Returns numpy array
+    batch_size = 32  # Adjust based on your GPU memory
+    all_embeddings = []
+    
+    print("Generating embeddings...")
+    for i in tqdm(range(0, len(all_chunk_texts), batch_size), desc="Embedding"):
+        batch_texts = all_chunk_texts[i:i+batch_size]
+        batch_embeddings = model.encode(
+            batch_texts,
+            convert_to_tensor=False,
+            truncation=True,
+            show_progress_bar=False  # Disable internal progress bar
+        )
+        all_embeddings.append(batch_embeddings)
+    
+    all_embeddings = np.concatenate(all_embeddings)
 
-    # Compute average embedding per content
+    # Compute average embeddings with progress
     content_embeddings = []
-    for idx in range(len(df)):
+    print("Aggregating results...")
+    for idx in tqdm(range(len(df)), desc="Averaging"):
         idx_mask = np.array(content_indices) == idx
         if idx_mask.any():
             content_embedding = np.mean(all_embeddings[idx_mask], axis=0)
         else:
             content_embedding = np.zeros(model.get_sentence_embedding_dimension())
         content_embeddings.append(content_embedding)
+        
     return content_embeddings
 
 
 async def load_and_preprocess():
-    spv_dataset, w3schools, geeksforgeeks, w3cschools = load_dataset()
-    results = await asyncio.gather(preprocess_spv_dataset(spv_dataset), 
-                                   preprocess_w3schools(w3schools), 
-                                   preprocess_geeksforgeeks(geeksforgeeks),
-                                   preprocess_w3cschools(w3cschools)
+    geeksforgeeks, pytorch_cn, pytorch, scikit, spv_dataset, tensorflow, tensorflow_cn, w3cschools, w3schools = load_dataset()
+    results = await asyncio.gather(
+        preprocess_dataframe(geeksforgeeks, ['timestamp', "Source"]),
+        preprocess_dataframe(pytorch_cn, ['timestamp'], 'zh-cn'),
+        preprocess_dataframe(pytorch, ['timestamp']),
+        preprocess_dataframe(scikit, ['timestamp']),
+        preprocess_spv_dataset(spv_dataset),
+        preprocess_dataframe(tensorflow, ['timestamp']),
+        preprocess_dataframe(tensorflow_cn, ['timestamp'], 'zh-cn'),
+        preprocess_dataframe(w3cschools, ['timestamp', 'section_titles'], 'zh-cn'),
+        preprocess_dataframe(w3schools, ['timestamp', 'Source']),
                                    )    
-    return results
+    return pd.concat(results)
     
 if __name__ == "__main__":
-    load_dotenv(dotenv_path=".env")
-    
     print("Preprocessing dataset...")
-    supervisor_dataset, w3schools, geeksforgeeks, w3cschools = asyncio.run(load_and_preprocess())
-    Dataframe = pd.concat([supervisor_dataset,w3schools, geeksforgeeks, w3cschools])
+    Dataframe = asyncio.run(load_and_preprocess())
     print("Creating embeddings for dataset..")
-
     Dataframe['embeddings'] = get_embeddings(Dataframe)
     # Convert embeddings to lists for Parquet compatibility
     Dataframe['embeddings'] = Dataframe['embeddings'].apply(lambda x: x.tolist())
+    Dataframe.to_parquet("Embeddings.parquet", engine="pyarrow")
+
     
-    with Database() as db:
-        db.create_or_get_collections("Embeddings_new_preprocess")
-        db.ingest_data(Dataframe, Dataframe['embeddings'])
-    
-    snapshot = tracemalloc.take_snapshot()
-    display_top(snapshot)
