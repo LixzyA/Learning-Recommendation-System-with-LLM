@@ -61,6 +61,8 @@ class Database:
                         "language": row["lang"],
                         "file_type": row['file_type'],
                         "url": row.get("url", ""),
+                        "upvote": 0,
+                        "downvote": 0,
                         "obj_uuid": generate_uuid5(row["content"]),
                     },
                     vector=row['embeddings']

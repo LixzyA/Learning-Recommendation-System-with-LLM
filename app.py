@@ -1,42 +1,48 @@
 from dotenv import load_dotenv
+from os import getenv
 from sentence_transformers import SentenceTransformer
 import torch
 from weaviate_db import Database
-from fastapi import FastAPI, Depends, Request, Response, Form, Cookie, HTTPException
-from fastapi.templating import Jinja2Templates
+from fastapi import FastAPI, Depends, Cookie, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from models import User
-from sqlite_db import SessionLocal, engine
-from utils import create_session, delete_session, get_user_by_session_token,cleanup_expired_sessions, get_user_by_username, create_user
+from models import SessionLocal, User, UserSession, Preference
 from contextlib import asynccontextmanager 
+from security import *
+from pydantic import BaseModel
+from pathlib import Path
+from typing import Optional
+import logging
 
-# Create database tables
-User.metadata.create_all(bind=engine)
 
+logging.basicConfig(
+    filename="app.log",  # Specify the log file name
+    level=logging.INFO,  # Set the logging level
+    format="%(asctime)s - %(levelname)s - %(message)s"  # Define the log format
+)
 weaviate_db: Database | None = None
 _model: SentenceTransformer | None = None
+sql_db = None
 
 @asynccontextmanager
 async def lifespan(app:FastAPI):
     load_dotenv(dotenv_path=".env")
+    global sql_db
     sql_db = SessionLocal()
-    cleanup_expired_sessions(sql_db)
-    sql_db.close()
     load_model()
 
     global weaviate_db
     with Database() as weaviate_db:
-        weaviate_db.create_or_get_collections("Embeddings_2")
+        weaviate_db.create_or_get_collections(getenv("WEAVIATE_DB"))
         yield
+    yield
 
 app = FastAPI(lifespan=lifespan)
-templates = Jinja2Templates(directory="templates")
 
 origins = [
-    "http://localhost",
-    "http://localhost:1234",
+    "http://localhost:3000",
 ]
 
 # Enable CORS for local development
@@ -48,100 +54,179 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# Dependency to get DB session
+# Dependency
 def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    global sql_db
+    if sql_db:
+        yield sql_db
+    else:
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
 
-# Session dependency
-def get_current_user(db: Session = Depends(get_db), session_token: str = Cookie(default=None)):
-    if not session_token:
+def get_current_user(db: Session = Depends(get_db), token: str = Cookie(None, alias="session_token")):
+    logging.info(f"token: {token}")
+    if not token:
         return None
-    user = get_user_by_session_token(db, session_token)
-    return user
+    user_id = validate_session(db, token)
+    if not user_id:
+        return None
+    return user_id
 
-# Serve static files (CSS/JS if needed)
-app.mount("/assets", StaticFiles(directory="templates/assets"), name="assets")
-app.mount("/images", StaticFiles(directory="templates/images"), name="images")
+# Models
+class UserCreate(BaseModel):
+    username: str
+    password: str
 
-@app.get("/")
-async def root(request: Request, current_user: User = Depends(get_current_user)):
-    if current_user:
-        return templates.TemplateResponse("index.html", {"request": request, "username": current_user.username})
-    return templates.TemplateResponse("login.html", {"request": request})
-    
-    
+class LoginRequest(BaseModel):
+    username: str
+    password: str
 
-@app.get("/login")
-async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# GET request
+@app.get("/", response_class=HTMLResponse)
+async def get_page(user_id: Optional[int] = Depends(get_current_user)):
+    if user_id:
+        return FileResponse("static/home.html")
+    else:
+        return RedirectResponse("static/login.html", status_code=307)
+
+@app.get("/login", response_class=HTMLResponse)
+async def get_login_page(user_id: Optional[int] = Depends(get_current_user)):
+    if user_id:
+        return RedirectResponse("static/home.html")
+    else:
+        return FileResponse("static/login.html")
+
+@app.get("/signup", response_class=HTMLResponse)
+async def get_signup_page(user_id: Optional[int] = Depends(get_current_user)):
+    if user_id:
+        return RedirectResponse("static/home.html")
+    else:
+        return FileResponse("static/signup.html")
+
+@app.get("/home", response_class=HTMLResponse)
+async def get_home_page(user_id: int = Depends(get_current_user)):
+    if user_id:
+        return FileResponse("static/home.html")
+    else:
+        return RedirectResponse("static/login.html")
+
+@app.get("/profile", response_class=HTMLResponse)
+async def get_profile_page(user_id: int = Depends(get_current_user)):
+    if user_id:
+        return FileResponse("static/profile.html")
+    else:
+        return RedirectResponse("static/login.html")
+
+# Static files handler
+@app.get("/static/{file_path:path}")
+async def serve_static(file_path: str):
+    static_path = Path("static") / file_path
+    if not static_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(static_path)
+
+# POST request
 @app.post("/login")
-async def login(
-    response: Response,
-    username: str = Form(),
-    password: str = Form(),
-    db: Session = Depends(get_db)
-):
-    user = get_user_by_username(db, username)
-    if not user or user.password != password:
-        return Response(content="Invalid credentials", status_code=401)
+async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.username == login_data.username).first()
+    if not user or not verify_password(login_data.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Incorrect credentials")
     
-    session_token = create_session(db, user)
-    response = Response(status_code=303, headers={"Location": "/"})
-    response.set_cookie(key="session_token", value=session_token)
-    return response
+    # Create new session
+    session_token = create_session_token()
+    new_session = UserSession(token=session_token, user_id=user.id)
+    db.add(new_session)
+    db.commit()
+    
+    return {"token": session_token}
 
 @app.post("/logout")
-async def logout(response: Response, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    if current_user:
-        delete_session(db, current_user)
-    response = Response(status_code=303, headers={"Location": "/"})
-    response.delete_cookie(key="session_token")
-    return response
-
-@app.get("/signup")
-async def signup_page(request: Request):
-    return templates.TemplateResponse("signup.html", {"request": request})
+async def logout(db: Session = Depends(get_db), user_id: Optional[int] = Depends(get_current_user)):
+    db.query(UserSession).filter(UserSession.user_id == user_id).delete()
+    db.commit()
+    return {"message": "Logged out successfully"}
 
 @app.post("/signup")
-async def signup(
-    username: str = Form(),
-    password: str = Form(),
-    db: Session = Depends(get_db)
-):
-    existing_user = get_user_by_username(db, username)
-    if existing_user:
-        return Response(content="Username already exists", status_code=400)
+async def signup(user: UserCreate, db: Session = Depends(get_db)):
+    # Check existing user
+    db_user = db.query(User).filter(User.username == user.username).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="Username already exists")
     
-    create_user(db, username, password)
-    return Response(status_code=303, headers={"Location": "/"})
+    # Create user
+    hashed_password = get_password_hash(user.password)
+    new_user = User(username=user.username, password_hash=hashed_password)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
 
-@app.get("/profile")
-async def user_page(request: Request, current_user: User = Depends(get_current_user)):
-    if not current_user:
-        return Response(status_code=303, headers={"Location": "/"})
-    return templates.TemplateResponse("profile.html", {
-        "request" : request,
-        "user": current_user
-    })
+    # Create default preference
+    default_preference = Preference(
+        user_id=new_user.id,  # Link the preference to the new user
+    )
+    db.add(default_preference)
+    db.commit()
 
+    # Create session
+    session_token = create_session_token()
+    new_session = UserSession(token=session_token, user_id=new_user.id)
+    db.add(new_session)
+    db.commit()
+    
+    return {"token": session_token}
 
-@app.get("/search")
-async def recomendation_page(query: str):
-    global _model, weaviate_db
+@app.post("/recommendation")
+async def recomendation_page(request: Request, query: dict, user_id: Optional[int] = Depends(get_current_user)):
+    global weaviate_db
+
+    query = query['input']
+    logging.info(f"query is {query}")
+    if not user_id:
+        return RedirectResponse(url="static/login.html", status_code=303)
+
+    model = load_model()
     try:
-        query_embedding = _model.encode(query, normalize_embeddings=True).tolist()
+        query_embedding = model.encode(query).tolist()
         property = {"language": 'en'}
         results = weaviate_db.search(query, query_embedding, property)
         return {"message": f"Searching for: {query}", "results": results}
     except Exception as e:
         raise HTTPException(status_code=404, detail=e)
-    
+
+# Endpoint to handle voting
+@app.post("/vote/{result_id}")
+async def vote(result_id: str, vote: str, request: Request, user_id: int = Depends(get_current_user)):
+    # Validate the vote direction
+    if vote not in ["up", "down"]:
+        raise HTTPException(status_code=400, detail="Invalid vote direction. Must be 'up' or 'down'.")
+
+    global weaviate_db
+    # get number of upvote / donwvote
+    response = weaviate_db.collection.query.fetch_object_by_id(uuid=result_id)
+    if not response:
+        return {"message": f"No object found with UUID {result_id}"}
+
+    if vote == 'up':
+        upvote = response.properties['upvote']
+        upvote += 1
+        weaviate_db.collection.data.update(uuid=result_id, properties={"upvote": upvote,})
+        current_votes = upvote
+    else:
+        downvote = response.properties['downvote']
+        downvote += 1
+        weaviate_db.collection.data.update(uuid=result_id, properties={"downvote": downvote,})
+        current_votes = downvote
+
+    return {
+        "message": "Vote recorded successfully",
+        "result_id": result_id,
+        "current_votes": current_votes
+    }
 
 def load_model():
     global _model
@@ -150,7 +235,6 @@ def load_model():
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
         model = model.to(device)
         _model = model
-        
     return _model
 
 if __name__ == "__main__":
