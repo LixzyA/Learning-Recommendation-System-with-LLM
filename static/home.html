@@ -69,17 +69,33 @@ function displayResults(results) {
         <p>Type: ${result.properties.file_type}</p>
         <p>Language: ${result.properties.language}</p>
         <p>URL: <a href="${result.properties?.url || '#'}" target="_blank">${result.properties?.url || 'None'}</a></p>
-        <button onclick="vote('${result.id}', 'up')">Upvote</button>
-        <button onclick="vote('${result.id}', 'down')">Downvote</button>
+        <p class="vote-count" data-id="${result.properties.obj_uuid}">Upvote: ${result.properties.upvote} Downvote: ${result.properties.downvote}</p>
+        <button onclick="vote('${result.properties.obj_uuid}', 'up')">Upvote</button>
+        <button onclick="vote('${result.properties.obj_uuid}', 'down')">Downvote</button>
     </div>
 `).join('');
 }
 
 async function vote(resultId, direction) {
-    await fetch(`http://localhost:1234/vote/${resultId}?vote=${direction}`, {
-        method: 'POST',
-        credentials: 'include'
-    });
+    try {
+        const response = await fetch(`http://localhost:1234/vote/${resultId}?vote=${direction}`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+
+        if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+        const data = await response.json();
+
+        if (data.status !== -1 && data.upvote !== undefined && data.downvote !== undefined) {
+            // Update specific vote count
+            const voteElement = document.querySelector(`.vote-count[data-id="${resultId}"]`);
+            if (voteElement) {
+                voteElement.textContent = `Upvote: ${data.upvote} Downvote: ${data.downvote}`;
+            }
+        }
+    } catch (error) {
+        console.error("Vote failed:", error);
+    }
 }
 
 // Logout handler

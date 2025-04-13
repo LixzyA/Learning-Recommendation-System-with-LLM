@@ -2,7 +2,6 @@ from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 import torch
 from weaviate_db import Database
-from os import getenv
 
 '''
 This script is only for development purposes.
@@ -21,7 +20,7 @@ if __name__ == "__main__":
     print("Loading model and Database...")
     model = load_model()
     with Database() as db:
-        db.create_or_get_collections(getenv("WEAVIATE_DB"))
+        # db.create_or_get_collections(getenv("WEAVIATE_DB"))
         
         while True:
             query = input("Input sth you want to search: ").lower().strip()

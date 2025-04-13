@@ -1,21 +1,22 @@
 import weaviate
+from weaviate.util import get_valid_uuid
 from weaviate.classes.query import Rerank, MetadataQuery
 from weaviate.classes.config import Configure
+from weaviate.classes.config import Property, DataType
 from weaviate.util import generate_uuid5
 import weaviate.classes as wvc
 from os import getenv
 import pandas as pd
 from dotenv import load_dotenv
-# import numpy as np
-
-
 
 class Database:
     def __init__(self):
         """Initialize the Database with API key and null client/collection."""
         self.api_key = getenv("COHERE_APIKEY")
         self.client = None
-        self.collection = None
+        self.collections = {} # Name-to-collection mapping
+        self.embeddings = getenv("WEAVIATE_EMBEDDINGS")
+        self.vote = getenv("WEAVIATE_VOTE")
 
     def __enter__(self):
         """Establish connection to Weaviate when entering the context."""
@@ -24,35 +25,53 @@ class Database:
         )
         if not self.client.is_ready():
             raise Exception("Error connecting to the database")
+        
+        self.collections[self.embeddings] = self._create_or_get_embedding_collections(getenv("WEAVIATE_EMBEDDINGS"))
+        self.collections[self.vote] = self._create_or_get_vote_collections(getenv("WEAVIATE_VOTE"))
+
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         """Close the Weaviate client connection when exiting the context."""
         self.client.close()
 
-    def create_or_get_collections(self, collection: str):
-        """Create or retrieve a collection in Weaviate."""
-        if not self.client.collections.exists(collection):
-            self.collection = self.client.collections.create(
-                collection,
-                reranker_config=Configure.Reranker.cohere()
-            )
+    def _create_or_get_embedding_collections(self, collection_name: str):
+        """Create or retrieve embedding collection in Weaviate."""
+        if not self.client.collections.exists(collection_name):
+            collection = self.client.collections.create(collection_name, reranker_config=Configure.Reranker.cohere())
         else:
-            self.collection = self.client.collections.get(collection)
+            collection = self.client.collections.get(collection_name)
+        return collection
+    
+    def _create_or_get_vote_collections(self, collection_name: str):
+        """Create or retrieve vote collection in Weaviate."""
+        if not self.client.collections.exists(collection_name):
+            collection = self.client.collections.create(
+                collection_name,
+                properties=[
+                        Property(name='obj_uuid', data_type=DataType.UUID),
+                        Property(name='user_id', data_type=DataType.INT),
+                        Property(name='vote_type', data_type=DataType.TEXT),
+                ])
+            
+        else:
+            collection = self.client.collections.get(collection_name)
+        return collection
 
-    def delete_auth(self, collection):
-        auth = input(f"Are you sure you want to delete {collection}? Y or N")
-        if auth.lower == 'y':
+    def _delete_auth(self, collection):
+        auth = input(f"Are you sure you want to delete {collection}? (Y or N)")
+        if auth.lower() == 'y':
             return True  
         return False
     
     def delete_collection(self, collection:str):
-        if self.delete_auth(collection):
+        if self._delete_auth(collection):
             self.client.collections.delete(collection)
+            print(f"{collection} deleted.")
 
     def ingest_data(self, Dataframe: pd.DataFrame):
         """Ingest data into the current collection."""
-        with self.collection.batch.dynamic() as batch:
+        with self.collections.get(self.embeddings).batch.dynamic() as batch:
             for idx, row in Dataframe.iterrows():
                 batch.add_object(
                     properties={
@@ -63,33 +82,84 @@ class Database:
                         "url": row.get("url", ""),
                         "upvote": 0,
                         "downvote": 0,
-                        "obj_uuid": generate_uuid5(row["content"]),
+                        "obj_uuid": generate_uuid5(row['content']), # to ensure no duplicates
                     },
                     vector=row['embeddings']
                 )
         print("Success ingesting data")
 
-    def search(self, query: str, query_embedding: list, property: dict | None):
+    def update_vote(self, obj_uuid, user_id, vote:str):
+        """Update the number of vote and last_interaction"""
+
+        """
+        1. Check if object exist in embeddings collection
+        2. Check if user already voted for that object
+        2.1 if already check if it is a diffrent vote, if it is then update in the vote collection and the count in the embeddings collection
+        2.2 if the user haven't voted yet, create a new vote object in the vote collection and update the count in embeddings collection
+        """
+        # Check if object exist
+        response = self.collections.get(self.embeddings).query.fetch_objects(filters = wvc.query.Filter.by_property("obj_uuid").equal(obj_uuid))
+        if not response:
+            raise LookupError(f"No object found with UUID {obj_uuid}")
+        
+        
+        
+        vote_response = self.collections.get(self.vote).query.fetch_objects(filters = (
+            wvc.query.Filter.all_of([
+                wvc.query.Filter.by_property("obj_uuid").equal((obj_uuid)),
+                wvc.query.Filter.by_property("user_id").equal(user_id)
+                ])
+            ))
+        # print(vote_response)
+        if vote_response.objects:
+            # Update vote type
+            existing_vote = vote_response.objects[0]
+            old_vote_type = existing_vote.properties['vote_type']
+            if old_vote_type == vote:
+                return (-1, -1)
+            self.collections.get(self.vote).data.update(uuid = existing_vote.uuid, properties = {"vote_type": vote})
+        else:
+            self.collections.get(self.vote).data.insert({"obj_uuid": obj_uuid, "user_id": user_id, "vote_type": vote})
+
+        response = response.objects[0]
+        upvote = response.properties['upvote']
+        downvote = response.properties['downvote']
+        if vote == 'up':
+            upvote += 1
+            downvote -= 1
+        else:
+            upvote -=1
+            downvote += 1
+        # Ensure counts don't go negative
+        upvote = max(upvote, 0)
+        downvote = max(downvote, 0)
+        self.collections.get(self.embeddings).data.update(uuid = response.uuid, properties = {"upvote": upvote, "downvote": downvote})
+        return (upvote, downvote)
+            
+
+    def search(self, query: str, query_embedding: list, property: dict | None, rerank: bool = False):
         """Search the current collection with a hybrid query."""
         if not query or not query.strip():
             raise ValueError("Query cannot be empty or whitespace.")
         
-        result = self.collection.query.hybrid(
-            query= query, vector=query_embedding, limit=10
-            # query_properties = ["name^2"]
-            # , filters = wvc.query.Filter.by_property("file_type").equal(property["file_type"])
-            # , rerank = Rerank(prop='content', query=query)
-            , alpha=0.5
-            , return_metadata=MetadataQuery(score=True)
-            )
-        
-        # result = self.collection.query.hybrid(
-        #     query=query,
-        #     vector=query_embedding,
-        #     limit=10,
-        #     rerank=Rerank(prop='content', query=query),
-        #     return_metadata=MetadataQuery(score=True)
-        # )
+        if rerank:
+            result = self.collections.get(self.embeddings).query.hybrid(
+                query= query, vector=query_embedding, limit=10
+                , filters = (
+                    wvc.query.Filter.by_property("file_type").equal(property["file_type"]) &
+                    wvc.query.Filter.by_property("language").equal(property['language'])
+                                      )
+                , rerank = Rerank(prop='content', query=query)
+                , alpha=0.5
+                , return_metadata=MetadataQuery(score=True)
+                )
+        else:
+            result = self.collections.get(self.embeddings).query.hybrid(
+                query= query, vector=query_embedding, limit=10
+                # , filters = wvc.query.Filter.by_property("file_type").equal(property["file_type"])
+                , alpha=0.5
+                , return_metadata=MetadataQuery(score=True)
+                )
         return result
 
     def close(self):
@@ -101,25 +171,48 @@ if __name__ == "__main__":
     
     load_dotenv(dotenv_path=".env")
     with Database() as db:
-        collection_name = getenv("WEAVIATE_DB")
-        db.create_or_get_collections(collection_name)
+        # collection_name = getenv("WEAVIATE_DB")
 
         print("""Menu:
-              1. Check number of object in a collection
-              2. Delete collection
+              1. Check number of object in embeddings collection
+              2. Check number of object in vote collection
+              3. Delete collection
+              4. Add vote to vote collection
 """)
         user_input = int(input("Option: "))
+        # user_input = 4
+        embedding_collection = getenv("WEAVIATE_EMBEDDINGS")
+        vote_collection = getenv("WEAVIATE_VOTE")
         if user_input == 1:
-            agg_result = db.collection.aggregate.over_all(total_count=True)
+            agg_result = db.collections.get(embedding_collection).aggregate.over_all(total_count=True)
 
             # Check if the collection is filled or empty
             if agg_result.total_count > 0:
-                print(f"The collection '{collection_name}' is filled with {agg_result.total_count} objects.")
+                print(f"The collection '{embedding_collection}' is filled with {agg_result.total_count} objects.")
             else:
-                print(f"The collection '{collection_name}' is empty.")
+                print(f"The collection '{embedding_collection}' is empty.")
 
-        if user_input == 2:
-            db.delete_collection(collection_name)
+        elif user_input == 2:
+            
+            agg_result = db.collections.get(vote_collection).aggregate.over_all(total_count=True)
+
+            # Check if the collection is filled or empty
+            if agg_result.total_count > 0:
+                print(f"The collection '{vote_collection}' is filled with {agg_result.total_count} objects.")
+            else:
+                print(f"The collection '{vote_collection}' is empty.")
+
+        elif user_input == 3:
+            option = input(f"Input the collection name to delete: 1. {embedding_collection}\n2.{vote_collection}")
+            if option == 1:
+                delete = embedding_collection
+            else:
+                delete = vote_collection
+            db.delete_collection(delete)
+        
+        elif user_input == 4:
+            db.update_vote("34aecf05-01ff-5ab8-a0bc-d1c8e6795d64", 2, "up")
+            # db.collections.get(vote_collection).data.insert({"obj_uuid": "34aecf05-01ff-5ab8-a0bc-d1c8e6795d64", "user_id": 3, "vote_type": "down"})
 
 
 

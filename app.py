@@ -35,7 +35,6 @@ async def lifespan(app:FastAPI):
 
     global weaviate_db
     with Database() as weaviate_db:
-        weaviate_db.create_or_get_collections(getenv("WEAVIATE_DB"))
         yield
     yield
 
@@ -71,6 +70,7 @@ def get_current_user(db: Session = Depends(get_db), token: str = Cookie(None, al
     if not token:
         return None
     user_id = validate_session(db, token)
+    logging.info(f"user_id: {user_id}")
     if not user_id:
         return None
     return user_id
@@ -195,8 +195,8 @@ async def recomendation_page(request: Request, query: dict, user_id: Optional[in
         property = {"language": 'en'}
         results = weaviate_db.search(query, query_embedding, property)
         return {"message": f"Searching for: {query}", "results": results}
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=e)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Query cannot be empty or whitespace.")
 
 # Endpoint to handle voting
 @app.post("/vote/{result_id}")
@@ -206,26 +206,22 @@ async def vote(result_id: str, vote: str, request: Request, user_id: int = Depen
         raise HTTPException(status_code=400, detail="Invalid vote direction. Must be 'up' or 'down'.")
 
     global weaviate_db
-    # get number of upvote / donwvote
-    response = weaviate_db.collection.query.fetch_object_by_id(uuid=result_id)
-    if not response:
+    logging.info(f"id is {result_id}")
+    try:
+        response = weaviate_db.update_vote(result_id, user_id, vote)
+    except LookupError:
         return {"message": f"No object found with UUID {result_id}"}
 
-    if vote == 'up':
-        upvote = response.properties['upvote']
-        upvote += 1
-        weaviate_db.collection.data.update(uuid=result_id, properties={"upvote": upvote,})
-        current_votes = upvote
-    else:
-        downvote = response.properties['downvote']
-        downvote += 1
-        weaviate_db.collection.data.update(uuid=result_id, properties={"downvote": downvote,})
-        current_votes = downvote
-
+    if response == (-1,-1):
+        return {
+            "message": "Vote recorded successfully",
+            "status": 0, # User already voted on the object and it was the same vote
+        }
     return {
         "message": "Vote recorded successfully",
-        "result_id": result_id,
-        "current_votes": current_votes
+        "status": 1,
+        "upvote": response[0],
+        "downvote": response[1], 
     }
 
 def load_model():
