@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<head>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <title>Home</title>
+</head>
+<div id="navbar">
+    <a href="/home">Home</a>
+    <a href="/profile">Profile</a>
+    <button id="logoutBtn">Logout</button>
+</div>
+
+<div id="recommendationInterface">
+    <select id="recommendationType">
+        <option value="Python Tutorial">Python Tutorial</option>
+        <option value="Machine Learning Tutorial">Machine Learning Tutorial</option>
+        <option value="custom">Custom</option>
+    </select>
+    <input type="text" id="customInput" style="display: none;">
+    <button id="searchBtn">Search</button>
+    <div id="results"></div>
+</div>
+
+<script>
+// Check authentication
+const token = document.cookie.split('; ').find(row => row.startsWith('session_token='))?.split('=')[1];
+if (!token) window.location.href = '/login';
+
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+    await fetch('http://localhost:8000/logout', {
+        method: 'POST',
+        credentials: 'include'
+    });
+    document.cookie = 'session_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+    window.location.href = '/login';
+});
+
+// Recommendation logic
+document.getElementById('recommendationType').addEventListener('change', (e) => {
+    document.getElementById('customInput').style.display = 
+        e.target.value === 'custom' ? 'block' : 'none';
+});
+
+document.getElementById('searchBtn').addEventListener('click', async () => {
+    const type = document.getElementById('recommendationType').value;
+    const input = type === 'custom' 
+        ? document.getElementById('customInput').value
+        : type;
+    
+    const response = await fetch('http://localhost:1234/recommendation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input }),
+        credentials: 'include'
+    });
+    
+    if (response.ok) {
+        const results = await response.json();
+        displayResults(results);
+    }
+});
+
+function displayResults(results) {
+    const container = document.getElementById('results');
+    recommendationList = results.results.objects
+    console.log(recommendationList)
+    container.innerHTML = recommendationList.slice(0, 3).map(result => `
+    <div class="result-item">
+        <h3>${result.properties.name}</h3>
+        <p>Type: ${result.properties.file_type}</p>
+        <p>Language: ${result.properties.language}</p>
+        <p>URL: <a href="${result.properties?.url || '#'}" target="_blank">${result.properties?.url || 'None'}</a></p>
+        <p class="vote-count" data-id="${result.properties.obj_uuid}">Upvote: ${result.properties.upvote} Downvote: ${result.properties.downvote}</p>
+        <button onclick="vote('${result.properties.obj_uuid}', 'up')">Upvote</button>
+        <button onclick="vote('${result.properties.obj_uuid}', 'down')">Downvote</button>
+    </div>
+`).join('');
+}
+
+async function vote(resultId, direction) {
+    try {
+        const response = await fetch(`http://localhost:1234/vote/${resultId}?vote=${direction}`, {
+            method: 'POST',
+            credentials: 'include'
+        });
+
+        if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+        const data = await response.json();
+
+        if (data.status !== -1 && data.upvote !== undefined && data.downvote !== undefined) {
+            // Update specific vote count
+            const voteElement = document.querySelector(`.vote-count[data-id="${resultId}"]`);
+            if (voteElement) {
+                voteElement.textContent = `Upvote: ${data.upvote} Downvote: ${data.downvote}`;
+            }
+        }
+    } catch (error) {
+        console.error("Vote failed:", error);
+    }
+}
+
+// Logout handler
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+        await fetch('/logout', { method: 'POST' });
+        document.cookie = 'session_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+        window.location.href = '/login';
+    });
+
+document.addEventListener('DOMContentLoaded', () => {
+    const token = document.cookie.split('; ').find(row => row.startsWith('session_token='))?.split('=')[1];
+    if (!token) {
+        window.location.href = '/login';
+    }
+});
+
+</script>

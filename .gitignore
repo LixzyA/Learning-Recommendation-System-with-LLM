@@ -9,5 +9,5 @@ SPV-dataset/
 *.parquet
 weaviate_data/
 *.ipynb
-__pycache__/
+__pycache__
 *.parquet

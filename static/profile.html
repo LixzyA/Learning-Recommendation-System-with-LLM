@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Profile</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div id="navbar">
+        <a href="/home">Home</a>
+        <a href="/profile">Profile</a>
+        <button id="logoutBtn">Logout</button>
+    </div>
+
+    <div class="profile-container">
+        <h2>Preferences</h2>
+        <div class="preference-form">
+            <div class="form-group">
+                <label>File Type:</label>
+                <select id="fileType">
+                    <option value="pdf">PDF</option>
+                    <option value="docx">Word</option>
+                    <option value="img">Image</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label>Language:</label>
+                <select id="language">
+                    <option value="en">English</option>
+                    <option value="zh-cn">Chinese</option>
+                </select>
+            </div>
+            
+            <button id="saveBtn">Save Preferences</button>
+            <div id="message"></div>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+        // Authentication check
+        const token = document.cookie.split('; ').find(row => row.startsWith('session_token='))?.split('=')[1];
+        if (!token) window.location.href = '/login';
+
+        // Load current preferences
+        try {
+            const response = await fetch('/profile', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            
+            if (response.ok) {
+                const preferences = await response.json();
+                document.getElementById('fileType').value = preferences.file_type;
+                document.getElementById('language').value = preferences.language;
+            }
+        } catch (error) {
+            console.error('Error loading preferences:', error);
+        }
+
+        // Save handler
+        document.getElementById('saveBtn').addEventListener('click', async () => {
+            const data = {
+                file_type: document.getElementById('fileType').value,
+                language: document.getElementById('language').value
+            };
+
+            try {
+                const response = await fetch('/profile/update', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+                document.getElementById('message').textContent = 
+                    response.ok ? 'Preferences saved!' : result.detail;
+            } catch (error) {
+                document.getElementById('message').textContent = 'Error saving preferences';
+            }
+        });
+    });
+
+    // Logout handler
+    document.getElementById('logoutBtn').addEventListener('click', async () => {
+        await fetch('/logout', { method: 'POST' });
+        document.cookie = 'session_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+        window.location.href = '/login';
+    });
+        // Check authentication on page load
+    document.addEventListener('DOMContentLoaded', () => {
+        const token = document.cookie.split('; ').find(row => row.startsWith('session_token='))?.split('=')[1];
+        if (!token) {
+            window.location.href = '/login';
+        }
+    });
+    </script>
+    
+</body>
+</html>

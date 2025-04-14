@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sign Up</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="auth-form">
+        <h2>Create Account</h2>
+        <form id="signupForm">
+            <input type="text" placeholder="Username" required>
+            <input type="password" placeholder="Password" required>
+            <input type="password" placeholder="Confirm Password" required>
+            <button type="submit">Sign Up</button>
+        </form>
+        <p>Already have an account? <a href="/login">Login here</a></p>
+    </div>
+
+    <script>
+    document.getElementById('signupForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        
+        // Client-side validation
+        if (form[1].value !== form[2].value) {
+            alert('Passwords do not match!');
+            return;
+        }
+
+        const formData = {
+            username: form[0].value,
+            password: form[1].value
+        };
+
+        try {
+            const response = await fetch('/signup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(formData)
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                document.cookie = `session_token=${data.token}; path=/`;
+                window.location.href = '/home';
+            } else {
+                const error = await response.json();
+                alert(error.detail || 'Signup failed');
+            }
+        } catch (error) {
+            console.error('Signup error:', error);
+            alert('Signup failed. Please try again.');
+        }
+    });
+    </script>
+</body>
+</html>
