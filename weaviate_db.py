@@ -1,5 +1,4 @@
 import weaviate
-from weaviate.util import get_valid_uuid
 from weaviate.classes.query import Rerank, MetadataQuery
 from weaviate.classes.config import Configure
 from weaviate.classes.config import Property, DataType
@@ -8,6 +7,8 @@ import weaviate.classes as wvc
 from os import getenv
 import pandas as pd
 from dotenv import load_dotenv
+from datetime import datetime
+from pytz import timezone
 
 class Database:
     def __init__(self):
@@ -52,6 +53,7 @@ class Database:
                         Property(name='obj_uuid', data_type=DataType.UUID),
                         Property(name='user_id', data_type=DataType.INT),
                         Property(name='vote_type', data_type=DataType.TEXT),
+                        Property(name="vote_time", data_type=DataType.DATE)
                 ])
             
         else:
@@ -82,6 +84,7 @@ class Database:
                         "url": row.get("url", ""),
                         "upvote": 0,
                         "downvote": 0,
+                        "last_interaction": datetime.now(timezone("Asia/Chongqing")),
                         "obj_uuid": generate_uuid5(row['content']), # to ensure no duplicates
                     },
                     vector=row['embeddings']
@@ -102,8 +105,6 @@ class Database:
         if not response:
             raise LookupError(f"No object found with UUID {obj_uuid}")
         
-        
-        
         vote_response = self.collections.get(self.vote).query.fetch_objects(filters = (
             wvc.query.Filter.all_of([
                 wvc.query.Filter.by_property("obj_uuid").equal((obj_uuid)),
@@ -117,9 +118,9 @@ class Database:
             old_vote_type = existing_vote.properties['vote_type']
             if old_vote_type == vote:
                 return (-1, -1)
-            self.collections.get(self.vote).data.update(uuid = existing_vote.uuid, properties = {"vote_type": vote})
+            self.collections.get(self.vote).data.update(uuid = existing_vote.uuid, properties = {"vote_type": vote, "vote_time": datetime.now("Asia/Chongqing")})
         else:
-            self.collections.get(self.vote).data.insert({"obj_uuid": obj_uuid, "user_id": user_id, "vote_type": vote})
+            self.collections.get(self.vote).data.insert({"obj_uuid": obj_uuid, "user_id": user_id, "vote_type": vote, "vote_time": datetime.now("Asia/Chongqing")})
 
         response = response.objects[0]
         upvote = response.properties['upvote']
@@ -133,7 +134,7 @@ class Database:
         # Ensure counts don't go negative
         upvote = max(upvote, 0)
         downvote = max(downvote, 0)
-        self.collections.get(self.embeddings).data.update(uuid = response.uuid, properties = {"upvote": upvote, "downvote": downvote})
+        self.collections.get(self.embeddings).data.update(uuid = response.uuid, properties = {"upvote": upvote, "downvote": downvote, "last_interaction": datetime.now("Asia/Chongqing")})
         return (upvote, downvote)
             
 
@@ -144,19 +145,24 @@ class Database:
         
         if rerank:
             result = self.collections.get(self.embeddings).query.hybrid(
-                query= query, vector=query_embedding, limit=10
-                , filters = (
-                    wvc.query.Filter.by_property("file_type").equal(property["file_type"]) &
-                    wvc.query.Filter.by_property("language").equal(property['language'])
-                                      )
+                query= query, vector=query_embedding, limit=5
+                # , filters = (
+                #     wvc.query.Filter.all_of([
+                #         wvc.query.Filter.by_property("file_type").equal(property["file_type"]),
+                #         wvc.query.Filter.by_property("language").equal(property['language'])
+                #         ]))
                 , rerank = Rerank(prop='content', query=query)
                 , alpha=0.5
                 , return_metadata=MetadataQuery(score=True)
                 )
         else:
             result = self.collections.get(self.embeddings).query.hybrid(
-                query= query, vector=query_embedding, limit=10
-                # , filters = wvc.query.Filter.by_property("file_type").equal(property["file_type"])
+                query= query, vector=query_embedding, limit=5
+                # , filters = (
+                #     wvc.query.Filter.all_of([
+                #         wvc.query.Filter.by_property("file_type").equal(property["file_type"]),
+                #         wvc.query.Filter.by_property("language").equal(property['language'])
+                #         ]))
                 , alpha=0.5
                 , return_metadata=MetadataQuery(score=True)
                 )
@@ -170,19 +176,18 @@ class Database:
 if __name__ == "__main__":
     
     load_dotenv(dotenv_path=".env")
+    embedding_collection = getenv("WEAVIATE_EMBEDDINGS")
+    vote_collection = getenv("WEAVIATE_VOTE")
     with Database() as db:
-        # collection_name = getenv("WEAVIATE_DB")
-
-        print("""Menu:
-              1. Check number of object in embeddings collection
-              2. Check number of object in vote collection
+        print(f"""Menu:
+              1. Check number of object in {embedding_collection} collection
+              2. Check number of object in {vote_collection} collection
               3. Delete collection
               4. Add vote to vote collection
 """)
         user_input = int(input("Option: "))
-        # user_input = 4
-        embedding_collection = getenv("WEAVIATE_EMBEDDINGS")
-        vote_collection = getenv("WEAVIATE_VOTE")
+        # user_input = 5
+        
         if user_input == 1:
             agg_result = db.collections.get(embedding_collection).aggregate.over_all(total_count=True)
 
@@ -212,7 +217,3 @@ if __name__ == "__main__":
         
         elif user_input == 4:
             db.update_vote("34aecf05-01ff-5ab8-a0bc-d1c8e6795d64", 2, "up")
-            # db.collections.get(vote_collection).data.insert({"obj_uuid": "34aecf05-01ff-5ab8-a0bc-d1c8e6795d64", "user_id": 3, "vote_type": "down"})
-
-
-

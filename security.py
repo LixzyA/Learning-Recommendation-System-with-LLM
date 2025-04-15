@@ -1,5 +1,4 @@
 from passlib.context import CryptContext
-from jose import JWTError, jwt
 from datetime import datetime, timedelta
 import uuid
 from models import UserSession

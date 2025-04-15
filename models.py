@@ -1,7 +1,6 @@
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.orm import sessionmaker, declarative_base
 from datetime import datetime
-# from sqlalchemy.orm import Session  # Database session
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./recommendation.db"
 
@@ -19,7 +18,7 @@ class UserSession(Base):
     __tablename__ = "sessions"
     token = Column(String, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    created_at = Column(DateTime, default=datetime.now())
+    created_at = Column(DateTime, default=datetime.now("Asia/Chongqing"))
 
 class Preference(Base):
     __tablename__ = "preferences"

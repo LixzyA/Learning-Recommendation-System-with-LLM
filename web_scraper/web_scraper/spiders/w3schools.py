@@ -62,7 +62,7 @@ class W3schoolsSpider(scrapy.Spider):
         item = WebPageItem()
         item['url'] = response.url
         item['content'] = content
-        item['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        item['timestamp'] = datetime.now("Asia/Chongqing").strftime("%Y-%m-%d %H:%M:%S")
         item['title'] = article_title
         
         yield item

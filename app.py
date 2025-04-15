@@ -192,9 +192,21 @@ async def recomendation_page(request: Request, query: dict, user_id: Optional[in
     model = load_model()
     try:
         query_embedding = model.encode(query).tolist()
-        property = {"language": 'en'}
-        results = weaviate_db.search(query, query_embedding, property)
-        return {"message": f"Searching for: {query}", "results": results}
+        property = {"language": 'en', "file_type": "pdf"}
+        no_rerank_results = weaviate_db.search(query, query_embedding, property)
+        rerank_results = weaviate_db.search(query, query_embedding, property, rerank=True)
+        # For A/B testing
+        file_name = "reranker.txt"
+        with open(file_name, mode='a', encoding="utf-8") as f:
+            f.write(f"Query: {query}, rerank: false, property: {property}\n")
+            for o in no_rerank_results.objects:
+                f.write(f"File name: {o.properties['name']}, File language: {o.properties['language']}, File type: {o.properties['file_type']} Last_interaction: {o.properties["last_interaction"]} Score: {o.metadata.score}, Reranker_score: {o.metadata.rerank_score}")
+            f.write(f"Query: {query}, rerank: True, property: {property}\n")
+            for o in rerank_results.objects:
+                f.write(f"File name: {o.properties['name']}, File language: {o.properties['language']}, File type: {o.properties['file_type']} Last_interaction: {o.properties["last_interaction"]} Score: {o.metadata.score}, Reranker_score: {o.metadata.rerank_score}\n")
+
+
+        return {"message": f"Searching for: {query}", "results": no_rerank_results}
     except ValueError:
         raise HTTPException(status_code=404, detail="Query cannot be empty or whitespace.")
 

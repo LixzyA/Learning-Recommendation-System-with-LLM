@@ -73,7 +73,7 @@ class geeksforgeeks(scrapy.Spider):
         item['title'] = article_title
         item['url'] = response.url
         item['content'] = content
-        item['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        item['timestamp'] = datetime.now("Asia/Chongqing").strftime("%Y-%m-%d %H:%M:%S")
         item['source'] = 'geeksforgeeks.org'
         
         yield item
