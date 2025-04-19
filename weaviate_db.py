@@ -9,6 +9,8 @@ import pandas as pd
 from dotenv import load_dotenv
 from datetime import datetime
 from pytz import timezone
+import math
+from collections import defaultdict
 
 class Database:
     def __init__(self):
@@ -166,7 +168,72 @@ class Database:
                 , alpha=0.5
                 , return_metadata=MetadataQuery(score=True)
                 )
-        return result
+            
+            # 2. Identify objects needing decay processing
+        threshold = 5
+        decay_candidates = [
+            obj.uuid for obj in result.objects
+            if (obj.properties["upvote"] + obj.properties["downvote"]) > threshold
+        ]
+
+        # 3. Batch fetch decayed scores for qualifying objects
+        decayed_scores = self._batch_get_decayed_scores(decay_candidates) if decay_candidates else {}
+
+        # 4. Calculate final scores
+        ranked_results = []
+        for obj in result.objects:
+            total_votes = obj.properties["upvote"] + obj.properties["downvote"]
+            
+            # Only consider votes if they pass threshold
+            if total_votes > threshold:
+                vote_score = decayed_scores.get(obj.uuid, {"up": 0, "down": 0})
+                net_votes = vote_score["up"] - vote_score["down"]
+            else:
+                net_votes = 0  # Ignore votes below threshold
+
+            if total_votes > 5:
+                combined_score = 0.7 * obj.metadata.score + 0.3 * net_votes
+            else:
+                combined_score = obj.metadata.score  # Full weight to search relevance
+            
+            ranked_results.append({
+                "object": obj,
+                "combined_score": combined_score,
+                "vote_used": total_votes > threshold
+            })
+
+        # 5. Return top 5 results
+        return sorted(ranked_results, key=lambda x: x["combined_score"], reverse=True)[:5]
+
+    def _batch_get_decayed_scores(self, uuids: list) -> dict:
+        """Batch process decayed scores for multiple objects"""
+        if not uuids:
+            return {}
+
+        HALF_LIFE_DAYS = 7  # Adjust this value to control decay speed
+        LAMBDA = math.log(2) / (HALF_LIFE_DAYS * 24)  # Hourly decay rate
+        now = datetime.now(timezone("Asia/Chongqing"))
+
+        # Fetch all votes for target objects
+        votes = self.collections.get(self.vote).query.fetch_objects(
+            filters=wvc.query.Filter.by_property("obj_uuid").contains_any(uuids),
+            return_properties=["obj_uuid", "vote_type", "vote_time"],
+            limit=10000
+        ).objects
+
+        # Calculate decayed scores
+        scores = defaultdict(lambda: {"up": 0.0, "down": 0.0})
+        for vote in votes:
+            obj_uuid = vote.properties["obj_uuid"]
+            age_hours = (now - vote.properties["vote_time"]).total_seconds() / 3600
+            decay = math.exp(-LAMBDA * age_hours)
+            
+            if vote.properties["vote_type"] == "up":
+                scores[obj_uuid]["up"] += decay
+            else:
+                scores[obj_uuid]["down"] += decay
+
+        return dict(scores)
 
     def close(self):
         """Manually close the client (optional with context manager)."""
