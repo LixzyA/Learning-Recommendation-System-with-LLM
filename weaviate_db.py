@@ -1,7 +1,6 @@
 import weaviate
 from weaviate.classes.query import Rerank, MetadataQuery
-from weaviate.classes.config import Configure
-from weaviate.classes.config import Property, DataType
+from weaviate.classes.config import Configure, Property, DataType
 from weaviate.util import generate_uuid5
 import weaviate.classes as wvc
 from os import getenv
@@ -75,7 +74,9 @@ class Database:
 
     def ingest_data(self, Dataframe: pd.DataFrame):
         """Ingest data into the current collection."""
-        with self.collections.get(self.embeddings).batch.dynamic() as batch:
+        counter = 0
+        interval = 1000  # print progress every this many records; should be bigger than the batch_size
+        with self.collections.get(self.embeddings).batch.fixed_size(batch_size=100) as batch:
             for idx, row in Dataframe.iterrows():
                 batch.add_object(
                     properties={
@@ -87,11 +88,14 @@ class Database:
                         "upvote": 0,
                         "downvote": 0,
                         "last_interaction": datetime.now(timezone("Asia/Chongqing")),
-                        "obj_uuid": generate_uuid5(row['content']), # to ensure no duplicates
                     },
+                    uuid = generate_uuid5(row), # Deterministic UUIDs to prevent duplicate entries
                     vector=row['embeddings']
                 )
-        print("Success ingesting data")
+                # Calculate and display progress
+                counter += 1
+                if counter % interval == 0:
+                    print(f"Imported {counter} articles...")
 
     def update_vote(self, obj_uuid, user_id, vote:str):
         """Update the number of vote and last_interaction"""
@@ -275,7 +279,7 @@ if __name__ == "__main__":
                 print(f"The collection '{vote_collection}' is empty.")
 
         elif user_input == 3:
-            option = input(f"Input the collection name to delete: 1. {embedding_collection}\n2.{vote_collection}")
+            option = int(input(f"Input the collection name to delete: 1. {embedding_collection}\n2.{vote_collection}"))
             if option == 1:
                 delete = embedding_collection
             else:
