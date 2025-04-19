@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-from os import getenv
+from os import makedirs
 from sentence_transformers import SentenceTransformer
 import torch
 from weaviate_db import Database
@@ -14,17 +14,13 @@ from security import *
 from pydantic import BaseModel
 from pathlib import Path
 from typing import Optional
-import logging
+import json
 
-
-logging.basicConfig(
-    filename="app.log",  # Specify the log file name
-    level=logging.INFO,  # Set the logging level
-    format="%(asctime)s - %(levelname)s - %(message)s"  # Define the log format
-)
 weaviate_db: Database | None = None
 _model: SentenceTransformer | None = None
 sql_db = None
+reranker_results = []
+no_reranker_results = []
 
 @asynccontextmanager
 async def lifespan(app:FastAPI):
@@ -66,11 +62,9 @@ def get_db():
             db.close()
 
 def get_current_user(db: Session = Depends(get_db), token: str = Cookie(None, alias="session_token")):
-    logging.info(f"token: {token}")
     if not token:
         return None
     user_id = validate_session(db, token)
-    logging.info(f"user_id: {user_id}")
     if not user_id:
         return None
     return user_id
@@ -185,7 +179,6 @@ async def recomendation_page(request: Request, query: dict, user_id: Optional[in
     global weaviate_db
 
     query = query['input']
-    logging.info(f"query is {query}")
     if not user_id:
         return RedirectResponse(url="static/login.html", status_code=303)
 
@@ -195,20 +188,71 @@ async def recomendation_page(request: Request, query: dict, user_id: Optional[in
         property = {"language": 'en', "file_type": "pdf"}
         no_rerank_results = weaviate_db.search(query, query_embedding, property)
         rerank_results = weaviate_db.search(query, query_embedding, property, rerank=True)
-        # For A/B testing
-        file_name = "reranker.txt"
-        with open(file_name, mode='a', encoding="utf-8") as f:
-            f.write(f"Query: {query}, rerank: false, property: {property}\n")
-            for o in no_rerank_results.objects:
-                f.write(f"File name: {o.properties['name']}, File language: {o.properties['language']}, File type: {o.properties['file_type']} Last_interaction: {o.properties["last_interaction"]} Score: {o.metadata.score}, Reranker_score: {o.metadata.rerank_score}")
-            f.write(f"Query: {query}, rerank: True, property: {property}\n")
-            for o in rerank_results.objects:
-                f.write(f"File name: {o.properties['name']}, File language: {o.properties['language']}, File type: {o.properties['file_type']} Last_interaction: {o.properties["last_interaction"]} Score: {o.metadata.score}, Reranker_score: {o.metadata.rerank_score}\n")
 
+        # For A/B testing
+
+        global no_reranker_results, reranker_results
+        no_rerank_formatted_results = []
+        for obj in no_rerank_results:
+            formatted_result = {
+                "name": obj['object'].properties.get('name'),
+                "language": obj['object'].properties.get('language'),
+                "file_type": obj['object'].properties.get('file_type'),
+                "last_interaction": obj['object'].properties.get('last_interaction').isoformat(),
+                "score": obj['object'].metadata.score,
+                "combined_score": obj.get('combined_score')
+            }
+            no_rerank_formatted_results.append(formatted_result)
+        # Create final JSON structure
+        no_rerank_query_entry = {
+            "query": query,
+            "results": no_rerank_formatted_results
+        }
+        no_reranker_results.append(no_rerank_query_entry)
+
+
+        rerank_formatted_results = []
+        for obj in rerank_results:            
+            formatted_result = {
+                "name": obj['object'].properties.get('name'),
+                "language": obj['object'].properties.get('language'),
+                "file_type": obj['object'].properties.get('file_type'),
+                "last_interaction": obj['object'].properties.get('last_interaction').isoformat(),
+                "score": obj['object'].metadata.score,
+                "rerank_score": obj['object'].metadata.rerank_score,
+                "combined_score": obj.get('combined_score'),
+            }
+            rerank_formatted_results.append(formatted_result)
+        # Create final JSON structure
+        rerank_query_entry = {
+            "query": query,
+            "results": rerank_formatted_results
+        }
+        reranker_results.append(rerank_query_entry)
+        
+        
 
         return {"message": f"Searching for: {query}", "results": no_rerank_results}
     except ValueError:
         raise HTTPException(status_code=404, detail="Query cannot be empty or whitespace.")
+
+@app.get("/save")
+async def save():
+    """This function saves the result from reranker and non reranker test"""
+    rerank_file = "results/rerank.json"
+    no_rerank_file = "results/no_rerank.json"
+    global reranker_results, no_reranker_results
+    # Before opening the file, ensure the directory exists
+    makedirs('results', exist_ok=True)  # This creates the directory if it doesn't exist
+
+    with open(rerank_file, mode='w', encoding="utf-8") as f:
+        json.dump(reranker_results, f, ensure_ascii=False, indent=2)
+    with open(no_rerank_file, mode='w', encoding="utf-8") as f:
+        json.dump(no_reranker_results, f, ensure_ascii=False, indent=2)
+    reranker_results = []
+    no_reranker_results = []
+
+
 
 # Endpoint to handle voting
 @app.post("/vote/{result_id}")
@@ -218,7 +262,6 @@ async def vote(result_id: str, vote: str, request: Request, user_id: int = Depen
         raise HTTPException(status_code=400, detail="Invalid vote direction. Must be 'up' or 'down'.")
 
     global weaviate_db
-    logging.info(f"id is {result_id}")
     try:
         response = weaviate_db.update_vote(result_id, user_id, vote)
     except LookupError:
