@@ -14,3 +14,4 @@ __pycache__
 Recommendation.py
 *.txt
 *.yaml
+.scrapy/
