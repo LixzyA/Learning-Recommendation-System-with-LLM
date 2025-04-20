@@ -29,8 +29,8 @@ def generate_hash(content):
     return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
 async def preprocess_spv_dataset(df) -> pd.DataFrame:
-    for index in [3,37,38,46,55,56,71,79,80,81,83,85,87,89,94,95,96]:
-        df.at[index, 'lang'] = 'zh-cn'
+    df['lang'] = df['lang'].str.lower()  # Normalize to lowercase
+    df.loc[~df['lang'].isin(['en', 'zh-cn']), 'lang'] = 'zh-cn'
     df =df.rename(columns={"name":"title"})
     return df
 
