@@ -2,8 +2,9 @@ import scrapy
 from web_scraper.items import WebPageItem
 from datetime import datetime
 from bs4 import BeautifulSoup
+from pytz import timezone
 
-def extract_content_and_titles(html, is_index=False):
+def extract_content(html, is_index=False):
     """
     Extracts content and section titles from the given HTML, handling both index and content pages.
 
@@ -12,49 +13,59 @@ def extract_content_and_titles(html, is_index=False):
         is_index (bool): True if the page is the index page, False otherwise.
 
     Returns:
-        tuple: (content_str, section_titles) - Extracted content in markdown and list of titles.
+        str: Extracted content in markdown, or empty string if no content found.
     """
     soup = BeautifulSoup(html, 'html.parser')
-    section_titles = []
-    content= ""
+    content = ""
 
     if is_index:
-    # Index page extraction
-        intro_div = soup.find_all('div', class_='content-intro')
-        for intro in intro_div:
-            content += intro.get_text(strip=True)
+        # Index page extraction: Concatenate all matching intros
+        intro_divs = soup.find_all('div', class_='content-intro')
+        for intro in intro_divs:
+            if intro:  # Check if element exists (defensive)
+                content += intro.get_text(strip=True)
     else:
+        # Non-index: Try 'content-intro' first, fall back to 'view-box'
+        content_div = soup.find('div', class_='content-intro') or soup.find('div', class_='view-box')
+        if content_div:
+            content = content_div.get_text(strip=True)
 
-        content_div = soup.find('div', class_ = ['content-intro', 'view-box'])
-        try:
-            sections = content_div.find_all("h2")
-            section_titles = [text for titles in sections if (text := titles.get_text(strip=True))]
-        except:
-            pass
-
-        content += content_div.get_text(strip=True)
-        
-    return content, section_titles
+    return content  # Returns "" if nothing found
 
 class W3cschoolsSpider(scrapy.Spider):
     name = "w3cschools"
     allowed_domains = ["w3cschool.cn"]
     start_urls = [
-                # "https://www.w3cschool.cn/python3/"
-                #    "https://www.w3cschool.cn/deepseekdocs/"
-                #   "https://www.w3cschool.cn/pytorch/", 
-                "https://www.w3cschool.cn/tensorflow_python/"
-                #   "https://www.w3cschool.cn/artificial_intelligence/", 
-                # "https://www.w3cschool.cn/mysql/"
-                #   ,"https://www.w3cschool.cn/redis/"
+                "https://www.w3cschool.cn/python3/",
+                "https://www.w3cschool.cn/deepseekdocs/" ,
+                "https://www.w3cschool.cn/pytorch/", 
+                "https://www.w3cschool.cn/tensorflow_python/",
+                "https://www.w3cschool.cn/artificial_intelligence/", 
+                "https://www.w3cschool.cn/mysql/",
+                "https://www.w3cschool.cn/redis/",
+                "https://www.w3cschool.cn/c/",
+                "https://www.w3cschool.cn/linux/",
+                "https://www.w3cschool.cn/java/",
+                "https://www.w3cschool.cn/weixinapp/",
+                "https://www.w3cschool.cn/sql/",
+                "https://www.w3cschool.cn/javascript/",
+                "https://www.w3cschool.cn/cpp/",
+                "https://www.w3cschool.cn/sass/",
+                "https://www.w3cschool.cn/jquery/",
+                "https://www.w3cschool.cn/react/",
+                "https://www.w3cschool.cn/go/",
+                "https://www.w3cschool.cn/r/",
+                "https://www.w3cschool.cn/ruby/",
+                "https://www.w3cschool.cn/php/",
+                "https://www.w3cschool.cn/neo4j/",
+                "https://www.w3cschool.cn/spark/",
+                "https://www.w3cschool.cn/docker/",
+                "https://www.w3cschool.cn/kubernetes/"
                   ]
     
     custom_settings = {
         'DEPTH_LIMIT': 0,
         'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
-        'HTTPCACHE_ENABLED': True,
-        'CONCURRENT_REQUESTS': 5,  # Limit to 5 concurrent requests
-        'PLAYWRIGHT_MAX_PAGES_PER_CONTEXT': 10,  # Limit pages per context
     }
 
     def start_requests(self):
@@ -62,41 +73,41 @@ class W3cschoolsSpider(scrapy.Spider):
             yield scrapy.Request(
                 url,
                 meta={
-                    "playwright": True,
-                    "playwright_include_page": True,
-                    "playwright_page_init_coroutine": self.setup_block_media,
+                    # "playwright": True,
+                    # "playwright_include_page": True,
+                    # "playwright_page_init_coroutine": self.setup_block_media,
                     "errback": self.errback,
-                    'DOWNLOAD_DELAY': 1,  # Wait 2 seconds between requests
-                    'RANDOMIZE_DOWNLOAD_DELAY': True,  # Randomize the delay
-                    'RETRY_TIMES': 2,  # Retry only 2 times
-                    'RETRY_HTTP_CODES': [500, 503, 504, 408],  # Exclude 502
-                    'CONCURRENT_REQUESTS': 10,  # Limit to 5 at a time
+                    'RETRY_TIMES': 3,  # Retry only 2 times
+                    "RETRY_HTTP_CODES" : [500, 502, 503, 504, 408, 429]  # Include 429 for rate limiting
                 },
                 callback=self.parse
             )
 
     async def parse(self, response):
-        self.logger.info(f"Status {response.status} for {response.url}")
-        if response.status != 200:
-            self.logger.warning(f"Non-200 response: {response.text[:200]}")
-
-        article_title = response.css("title::text").get()
-        
-        # Determine if this is the index page
-        is_index = response.url in self.start_urls
-        content, section_titles = extract_content_and_titles(response.text, is_index)
-        item = WebPageItem()
-        item['url'] = response.url
-        item['content'] = content
-        item['timestamp'] = datetime.now("Asia/Chongqing").strftime("%Y-%m-%d %H:%M:%S")
-        item['title'] = article_title
-        item['section_titles'] = section_titles
-        yield item
-
-        # Close the Playwright page to free resources
         page = response.meta.get("playwright_page")
-        if page:
-            await page.close()
+        try:
+            self.logger.info(f"Status {response.status} for {response.url}")
+            if response.status != 200:
+                self.logger.warning(f"Non-200 response: {response.text[:200]}")
+                return
+
+            article_title = response.css("title::text").get()
+            
+            # Determine if this is the index page
+            is_index = response.url in self.start_urls
+            content = extract_content(response.text, is_index)
+            item = WebPageItem()
+            item['url'] = response.url
+            item['content'] = content
+            item['timestamp'] = datetime.now(timezone("Asia/Chongqing")).strftime("%Y-%m-%d %H:%M:%S")
+            item['title'] = article_title
+            yield item
+
+        finally:
+            # # Close the Playwright page to free resources
+            if page:
+                await page.close()
+                self.logger.info(f"Closed Playwright page for {response.url}") # Add info log
         
         self.logger.info(f"Processed {response.url}, queue size: {len(self.crawler.engine.slot.scheduler)}")
 
@@ -109,23 +120,23 @@ class W3cschoolsSpider(scrapy.Spider):
                 link,
                 callback=self.parse,
                 meta={
-                    "playwright": True,
-                    "playwright_include_page": True,
-                    "playwright_page_init_coroutine": self.setup_block_media,
+                    # "playwright": True,
+                    # "playwright_include_page": True,
+                    # "playwright_page_init_coroutine": self.setup_block_media,
                     "errback": self.errback,
-                    'DOWNLOAD_DELAY': 1,  # Wait 2 seconds between requests
-                    'RANDOMIZE_DOWNLOAD_DELAY': True,  # Randomize the delay
-                    'RETRY_TIMES': 2,  # Retry only 2 times
-                    'RETRY_HTTP_CODES': [500, 503, 504, 408],  # Exclude 502
-                    'CONCURRENT_REQUESTS': 10,  # Limit to 5 at a time
+                    'RETRY_TIMES': 3,  # Retry only 2 times
+                    "RETRY_HTTP_CODES" : [500, 502, 503, 504, 408, 429]  # Include 429 for rate limiting
                 },
             )
 
     async def errback(self, failure):
-        self.logger.error(f"Request failed: {failure.request.url}")
         page = failure.request.meta.get("playwright_page")
-        if page:
-            await page.close()
+        try:
+            self.logger.error(f"Request failed: {failure.request.url} - {failure.value}") # Log error value
+        finally:
+            if page:
+                await page.close()
+                self.logger.info(f"Closed Playwright page on error for {failure.request.url}") # Add info log
     
     async def block_media(self, route):
     # Block non-essential resources

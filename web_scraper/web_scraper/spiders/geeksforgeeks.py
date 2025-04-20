@@ -2,6 +2,7 @@ import scrapy
 from web_scraper.items import WebPageItem
 from bs4 import BeautifulSoup
 from datetime import datetime 
+from pytz import timezone
 
 def clean_article(html):
     soup = BeautifulSoup(html, 'html.parser')
@@ -50,16 +51,23 @@ def clean_article(html):
 
 class geeksforgeeks(scrapy.Spider):
     name = 'geeksforgeeks'
-    allowed_domains = ['geeksforgeeks.org', "w3schools.com"]
-    start_urls = ['https://www.geeksforgeeks.org/introduction-to-redis-server/', 'https://www.geeksforgeeks.org/machine-learning/'
-                  , 'https://www.geeksforgeeks.org/artificial-intelligence/', 'https://www.geeksforgeeks.org/python-programming-language-tutorial/'
-                  'https://www.geeksforgeeks.org/data-science-with-python-tutorial/']
+    allowed_domains = ['geeksforgeeks.org']
+    start_urls = [
+                'https://www.geeksforgeeks.org/introduction-to-redis-server/', 
+                'https://www.geeksforgeeks.org/machine-learning/',
+                'https://www.geeksforgeeks.org/artificial-intelligence/', 
+                'https://www.geeksforgeeks.org/python-programming-language-tutorial/',
+                'https://www.geeksforgeeks.org/data-science-with-python-tutorial/',
+                'https://www.geeksforgeeks.org/devops-tutorial/',
+                'https://www.geeksforgeeks.org/dsa-tutorial-learn-data-structures-and-algorithms/',
+                'https://www.geeksforgeeks.org/ai-ml-ds/',
+                'https://www.geeksforgeeks.org/web-development/',
+                'https://www.geeksforgeeks.org/system-design-tutorial/'
+                  ]
     
     custom_settings = {
-        'DEPTH_LIMIT': 2,
+        'DEPTH_LIMIT': 5,
         'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
-        'FILES_STORE': 'webpages',  # Directory to save pages
-        'HTTPCACHE_ENABLED': True
     }
 
     def parse(self, response):
@@ -73,7 +81,7 @@ class geeksforgeeks(scrapy.Spider):
         item['title'] = article_title
         item['url'] = response.url
         item['content'] = content
-        item['timestamp'] = datetime.now("Asia/Chongqing").strftime("%Y-%m-%d %H:%M:%S")
+        item['timestamp'] = datetime.now(timezone("Asia/Chongqing")).strftime("%Y-%m-%d %H:%M:%S")
         item['source'] = 'geeksforgeeks.org'
         
         yield item

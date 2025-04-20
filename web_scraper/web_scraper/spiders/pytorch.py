@@ -35,7 +35,7 @@ class PytorchSpider(scrapy.Spider):
     name = "pytorch"
     allowed_domains = ["pytorch.org", "pytorch.ac.cn"]
     start_urls = [
-        # "https://pytorch.org/tutorials/index.html",
+        "https://pytorch.org/tutorials/index.html",
         "https://pytorch.ac.cn/tutorials/",
                   ]
     
