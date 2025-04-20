@@ -92,18 +92,13 @@ ROBOTSTXT_OBEY = True
 REQUEST_FINGERPRINTER_IMPLEMENTATION = "2.7"
 TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 FEED_FORMAT = "json"
-FEED_URI = "pytorch-cn-extra.json"  # Output filename
+FEED_URI = "liaoxuefeng.json"  # Output filename
 FEED_EXPORT_ENCODING = "utf-8"  # For non-ASCII characters
 FEED_EXPORT_INDENT = 4  # Optional: Makes JSON human-readable
-
-ROBOTSTXT_OBEY = True  # Respect robots.txt rules
-DOWNLOAD_DELAY = 0     
-AUTOTHROTTLE_ENABLED = False
-
 DUPEFILTER_CLASS = 'scrapy.dupefilters.RFPDupeFilter'
 
 # DOWNLOAD_HANDLERS = {
-#     "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+#     "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler", # Only enable this if use playwright
 #     "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
 # }
 DOWNLOADER_CLIENT_TLS_METHOD = 'TLSv1.2'  # Modern TLS
@@ -112,11 +107,23 @@ DOWNLOAD_HANDLERS = {
     'https': 'scrapy.core.downloader.handlers.http.HTTPDownloadHandler',
 }
 
+PLAYWRIGHT_LAUNCH_OPTIONS = {
+    "headless": True,  # Run in headless mode for better performance
+    "args": ["--disable-gpu", "--no-sandbox"],  # Optimize browser launch
+}
 
 LOG_FILE = 'scrapy.log'
 LOG_LEVEL = 'INFO'
 RETRY_ENABLED = True
-CONCURRENT_REQUESTS = 32 
-CONCURRENT_REQUESTS_PER_DOMAIN = 16
-REACTOR_THREADPOOL_MAXSIZE = 30  
-# PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = 60000  # 60 seconds
+# CONCURRENT_REQUESTS = 10
+# CONCURRENT_REQUESTS_PER_DOMAIN = 20 # Reduce to avoid being rate limited
+# REACTOR_THREADPOOL_MAXSIZE = 30  
+# AUTOTHROTTLE_ENABLED = True
+# AUTOTHROTTLE_DEBUG = True
+LOGSTATS_INTERVAL = 30.0  # Log stats every 30 seconds
+# PLAYWRIGHT_MAX_CONTEXTS = 10
+# PLAYWRIGHT_MAX_PAGES_PER_CONTEXT = 10
+# MAX_BROWSER_INSTANCES = 4
+# PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = 30000  # 30 seconds
+# DOWNLOAD_DELAY = 0.5
+# RANDOMIZE_DOWNLOAD_DELAY = True

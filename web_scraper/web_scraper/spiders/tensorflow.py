@@ -86,7 +86,7 @@ class TensorflowSpider(scrapy.Spider):
             content = extract_content(response.text)
             item = WebPageItem()
             item['url'] = response.url
-            item['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            item['timestamp'] = datetime.now("Asia/Chongqing").strftime("%Y-%m-%d %H:%M:%S")
             item['content'] = extract_content(response.text)
             item['title'] = article_title
 

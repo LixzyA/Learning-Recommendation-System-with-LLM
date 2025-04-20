@@ -2,6 +2,7 @@ import scrapy
 from web_scraper.items import WebPageItem
 from datetime import datetime
 from bs4 import BeautifulSoup
+from pytz import timezone
 
 def extract_content_text(html):
     soup = BeautifulSoup(html, 'html.parser')
@@ -34,20 +35,39 @@ def extract_content_text(html):
 class W3schoolsSpider(scrapy.Spider):
     name = "w3schools"
     allowed_domains = ["w3schools.com"]
-    start_urls = ["https://www.w3schools.com/ai/default.asp",
-                   "https://www.w3schools.com/mysql/default.asp",
-                  "https://www.w3schools.com/datascience/default.asp", "https://www.w3schools.com/gen_ai/index.php",
-                  "https://www.w3schools.com/python/default.asp",
-                  'https://www.geeksforgeeks.org/introduction-to-redis-server/', 'https://www.geeksforgeeks.org/machine-learning/'
-                  , 'https://www.geeksforgeeks.org/artificial-intelligence/', 'https://www.geeksforgeeks.org/python-programming-language-tutorial/'
-                  'https://www.geeksforgeeks.org/data-science-with-python-tutorial/'
+    start_urls = [
+                    "https://www.w3schools.com/ai/default.asp",
+                    "https://www.w3schools.com/mysql/default.asp",
+                    "https://www.w3schools.com/datascience/default.asp", 
+                    "https://www.w3schools.com/gen_ai/index.php",
+                    "https://www.w3schools.com/python/default.asp",
+                    "https://www.w3schools.com/js/default.asp",
+                    "https://www.w3schools.com/css/default.asp",
+                    "https://www.w3schools.com/css/default.asp",
+                    "https://www.w3schools.com/c/index.php",
+                    "https://www.w3schools.com/java/default.asp",
+                    "https://www.w3schools.com/php/default.asp",
+                    "https://www.w3schools.com/howto/default.asp",
+                    "https://www.w3schools.com/bootstrap5/index.php",
+                    "https://www.w3schools.com/react/default.asp",
+                    "https://www.w3schools.com/python/numpy/default.asp",
+                    "https://www.w3schools.com/django/index.php",
+                    "https://www.w3schools.com/xml/default.asp",
+                    "https://www.w3schools.com/python/numpy/default.asp",
+                    "https://www.w3schools.com/python/pandas/default.asp",
+                    "https://www.w3schools.com/git/default.asp",
+                    "https://www.w3schools.com/postgresql/index.php",
+                    "https://www.w3schools.com/programming/index.php",
+                    "https://www.w3schools.com/python/scipy/index.php",
+                    "https://www.w3schools.com/mongodb/index.php",
+                    "https://www.w3schools.com/bootstrap/default.asp",
+                    "https://www.w3schools.com/bootstrap4/default.asp",
+                    "https://www.w3schools.com/jquery/default.asp",
                   ]
 
     custom_settings = {
-        'DEPTH_LIMIT': 2,
+        'DEPTH_LIMIT': 0,
         'USER_AGENT': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
-        'FILES_STORE': 'webpages',  # Directory to save pages
-        'HTTPCACHE_ENABLED': True
     }
 
     def parse(self, response):
@@ -62,7 +82,7 @@ class W3schoolsSpider(scrapy.Spider):
         item = WebPageItem()
         item['url'] = response.url
         item['content'] = content
-        item['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        item['timestamp'] = datetime.now(timezone("Asia/Chongqing")).strftime("%Y-%m-%d %H:%M:%S")
         item['title'] = article_title
         
         yield item

@@ -35,7 +35,7 @@ class PytorchSpider(scrapy.Spider):
     name = "pytorch"
     allowed_domains = ["pytorch.org", "pytorch.ac.cn"]
     start_urls = [
-        # "https://pytorch.org/tutorials/index.html",
+        "https://pytorch.org/tutorials/index.html",
         "https://pytorch.ac.cn/tutorials/",
                   ]
     
@@ -71,7 +71,7 @@ class PytorchSpider(scrapy.Spider):
             item['title'] = article_title
             item['content'] = content
             item['url'] = response.url
-            item['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            item['timestamp'] = datetime.now("Asia/Chongqing").strftime("%Y-%m-%d %H:%M:%S")
 
             yield item
         

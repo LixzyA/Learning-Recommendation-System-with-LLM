@@ -11,3 +11,7 @@ weaviate_data/
 *.ipynb
 __pycache__
 *.parquet
+Recommendation.py
+*.txt
+*.yaml
+.scrapy/

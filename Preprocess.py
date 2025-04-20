@@ -4,6 +4,7 @@ import pandas as pd
 import asyncio
 import numpy as np
 from tqdm.auto import tqdm
+import hashlib
 _model = None
 
 def load_dataset():
@@ -23,6 +24,9 @@ def load_dataset():
 
     return geeksforgeeks, pytorch_cn, pytorch, scikit, spv_dataset, tensorflow, tensorflow_cn, w3cschools, w3schools
 
+# Generate a hash for each content string
+def generate_hash(content):
+    return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
 async def preprocess_spv_dataset(df) -> pd.DataFrame:
     for index in [3,37,38,46,55,56,71,79,80,81,83,85,87,89,94,95,96]:
@@ -43,6 +47,8 @@ async def preprocess_dataframe(df:pd.DataFrame, column_to_drop: list, lang:str =
     """
     df= df.dropna()
     df= df[df['content'] != ""] # drop empty content rows
+    df['hash'] = df['content'].apply(generate_hash)
+    df = df.drop_duplicates(subset='hash', keep='first').drop(columns='hash')
     df = df.drop(column_to_drop, axis=1)
     df['lang']= lang
     df['file_type'] = file_type

@@ -1,13 +1,15 @@
 import weaviate
-from weaviate.util import get_valid_uuid
 from weaviate.classes.query import Rerank, MetadataQuery
-from weaviate.classes.config import Configure
-from weaviate.classes.config import Property, DataType
+from weaviate.classes.config import Configure, Property, DataType
 from weaviate.util import generate_uuid5
 import weaviate.classes as wvc
 from os import getenv
 import pandas as pd
 from dotenv import load_dotenv
+from datetime import datetime
+from pytz import timezone
+import math
+from collections import defaultdict
 
 class Database:
     def __init__(self):
@@ -52,6 +54,7 @@ class Database:
                         Property(name='obj_uuid', data_type=DataType.UUID),
                         Property(name='user_id', data_type=DataType.INT),
                         Property(name='vote_type', data_type=DataType.TEXT),
+                        Property(name="vote_time", data_type=DataType.DATE)
                 ])
             
         else:
@@ -71,7 +74,9 @@ class Database:
 
     def ingest_data(self, Dataframe: pd.DataFrame):
         """Ingest data into the current collection."""
-        with self.collections.get(self.embeddings).batch.dynamic() as batch:
+        counter = 0
+        interval = 1000  # print progress every this many records; should be bigger than the batch_size
+        with self.collections.get(self.embeddings).batch.fixed_size(batch_size=100) as batch:
             for idx, row in Dataframe.iterrows():
                 batch.add_object(
                     properties={
@@ -82,11 +87,15 @@ class Database:
                         "url": row.get("url", ""),
                         "upvote": 0,
                         "downvote": 0,
-                        "obj_uuid": generate_uuid5(row['content']), # to ensure no duplicates
+                        "last_interaction": datetime.now(timezone("Asia/Chongqing")),
                     },
+                    uuid = generate_uuid5(row), # Deterministic UUIDs to prevent duplicate entries
                     vector=row['embeddings']
                 )
-        print("Success ingesting data")
+                # Calculate and display progress
+                counter += 1
+                if counter % interval == 0:
+                    print(f"Imported {counter} articles...")
 
     def update_vote(self, obj_uuid, user_id, vote:str):
         """Update the number of vote and last_interaction"""
@@ -102,8 +111,6 @@ class Database:
         if not response:
             raise LookupError(f"No object found with UUID {obj_uuid}")
         
-        
-        
         vote_response = self.collections.get(self.vote).query.fetch_objects(filters = (
             wvc.query.Filter.all_of([
                 wvc.query.Filter.by_property("obj_uuid").equal((obj_uuid)),
@@ -117,9 +124,9 @@ class Database:
             old_vote_type = existing_vote.properties['vote_type']
             if old_vote_type == vote:
                 return (-1, -1)
-            self.collections.get(self.vote).data.update(uuid = existing_vote.uuid, properties = {"vote_type": vote})
+            self.collections.get(self.vote).data.update(uuid = existing_vote.uuid, properties = {"vote_type": vote, "vote_time": datetime.now("Asia/Chongqing")})
         else:
-            self.collections.get(self.vote).data.insert({"obj_uuid": obj_uuid, "user_id": user_id, "vote_type": vote})
+            self.collections.get(self.vote).data.insert({"obj_uuid": obj_uuid, "user_id": user_id, "vote_type": vote, "vote_time": datetime.now("Asia/Chongqing")})
 
         response = response.objects[0]
         upvote = response.properties['upvote']
@@ -133,7 +140,7 @@ class Database:
         # Ensure counts don't go negative
         upvote = max(upvote, 0)
         downvote = max(downvote, 0)
-        self.collections.get(self.embeddings).data.update(uuid = response.uuid, properties = {"upvote": upvote, "downvote": downvote})
+        self.collections.get(self.embeddings).data.update(uuid = response.uuid, properties = {"upvote": upvote, "downvote": downvote, "last_interaction": datetime.now("Asia/Chongqing")})
         return (upvote, downvote)
             
 
@@ -144,23 +151,93 @@ class Database:
         
         if rerank:
             result = self.collections.get(self.embeddings).query.hybrid(
-                query= query, vector=query_embedding, limit=10
-                , filters = (
-                    wvc.query.Filter.by_property("file_type").equal(property["file_type"]) &
-                    wvc.query.Filter.by_property("language").equal(property['language'])
-                                      )
+                query= query, vector=query_embedding, limit=5
+                # , filters = (
+                #     wvc.query.Filter.all_of([
+                #         wvc.query.Filter.by_property("file_type").equal(property["file_type"]),
+                #         wvc.query.Filter.by_property("language").equal(property['language'])
+                #         ]))
                 , rerank = Rerank(prop='content', query=query)
                 , alpha=0.5
                 , return_metadata=MetadataQuery(score=True)
                 )
         else:
             result = self.collections.get(self.embeddings).query.hybrid(
-                query= query, vector=query_embedding, limit=10
-                # , filters = wvc.query.Filter.by_property("file_type").equal(property["file_type"])
+                query= query, vector=query_embedding, limit=5
+                # , filters = (
+                #     wvc.query.Filter.all_of([
+                #         wvc.query.Filter.by_property("file_type").equal(property["file_type"]),
+                #         wvc.query.Filter.by_property("language").equal(property['language'])
+                #         ]))
                 , alpha=0.5
                 , return_metadata=MetadataQuery(score=True)
                 )
-        return result
+            
+            # 2. Identify objects needing decay processing
+        threshold = 5
+        decay_candidates = [
+            obj.uuid for obj in result.objects
+            if (obj.properties["upvote"] + obj.properties["downvote"]) > threshold
+        ]
+
+        # 3. Batch fetch decayed scores for qualifying objects
+        decayed_scores = self._batch_get_decayed_scores(decay_candidates) if decay_candidates else {}
+
+        # 4. Calculate final scores
+        ranked_results = []
+        for obj in result.objects:
+            total_votes = obj.properties["upvote"] + obj.properties["downvote"]
+            
+            # Only consider votes if they pass threshold
+            if total_votes > threshold:
+                vote_score = decayed_scores.get(obj.uuid, {"up": 0, "down": 0})
+                net_votes = vote_score["up"] - vote_score["down"]
+            else:
+                net_votes = 0  # Ignore votes below threshold
+
+            if total_votes > 5:
+                combined_score = 0.7 * obj.metadata.score + 0.3 * net_votes
+            else:
+                combined_score = obj.metadata.score  # Full weight to search relevance
+            
+            ranked_results.append({
+                "object": obj,
+                "combined_score": combined_score,
+                "vote_used": total_votes > threshold
+            })
+
+        # 5. Return top 5 results
+        return sorted(ranked_results, key=lambda x: x["combined_score"], reverse=True)[:5]
+
+    def _batch_get_decayed_scores(self, uuids: list) -> dict:
+        """Batch process decayed scores for multiple objects"""
+        if not uuids:
+            return {}
+
+        HALF_LIFE_DAYS = 7  # Adjust this value to control decay speed
+        LAMBDA = math.log(2) / (HALF_LIFE_DAYS * 24)  # Hourly decay rate
+        now = datetime.now(timezone("Asia/Chongqing"))
+
+        # Fetch all votes for target objects
+        votes = self.collections.get(self.vote).query.fetch_objects(
+            filters=wvc.query.Filter.by_property("obj_uuid").contains_any(uuids),
+            return_properties=["obj_uuid", "vote_type", "vote_time"],
+            limit=10000
+        ).objects
+
+        # Calculate decayed scores
+        scores = defaultdict(lambda: {"up": 0.0, "down": 0.0})
+        for vote in votes:
+            obj_uuid = vote.properties["obj_uuid"]
+            age_hours = (now - vote.properties["vote_time"]).total_seconds() / 3600
+            decay = math.exp(-LAMBDA * age_hours)
+            
+            if vote.properties["vote_type"] == "up":
+                scores[obj_uuid]["up"] += decay
+            else:
+                scores[obj_uuid]["down"] += decay
+
+        return dict(scores)
 
     def close(self):
         """Manually close the client (optional with context manager)."""
@@ -170,19 +247,18 @@ class Database:
 if __name__ == "__main__":
     
     load_dotenv(dotenv_path=".env")
+    embedding_collection = getenv("WEAVIATE_EMBEDDINGS")
+    vote_collection = getenv("WEAVIATE_VOTE")
     with Database() as db:
-        # collection_name = getenv("WEAVIATE_DB")
-
-        print("""Menu:
-              1. Check number of object in embeddings collection
-              2. Check number of object in vote collection
+        print(f"""Menu:
+              1. Check number of object in {embedding_collection} collection
+              2. Check number of object in {vote_collection} collection
               3. Delete collection
               4. Add vote to vote collection
 """)
         user_input = int(input("Option: "))
-        # user_input = 4
-        embedding_collection = getenv("WEAVIATE_EMBEDDINGS")
-        vote_collection = getenv("WEAVIATE_VOTE")
+        # user_input = 5
+        
         if user_input == 1:
             agg_result = db.collections.get(embedding_collection).aggregate.over_all(total_count=True)
 
@@ -203,7 +279,7 @@ if __name__ == "__main__":
                 print(f"The collection '{vote_collection}' is empty.")
 
         elif user_input == 3:
-            option = input(f"Input the collection name to delete: 1. {embedding_collection}\n2.{vote_collection}")
+            option = int(input(f"Input the collection name to delete: 1. {embedding_collection}\n2.{vote_collection}"))
             if option == 1:
                 delete = embedding_collection
             else:
@@ -212,7 +288,3 @@ if __name__ == "__main__":
         
         elif user_input == 4:
             db.update_vote("34aecf05-01ff-5ab8-a0bc-d1c8e6795d64", 2, "up")
-            # db.collections.get(vote_collection).data.insert({"obj_uuid": "34aecf05-01ff-5ab8-a0bc-d1c8e6795d64", "user_id": 3, "vote_type": "down"})
-
-
-
