@@ -17,15 +17,19 @@
             <div class="form-group">
                 <label>File Type:</label>
                 <select id="fileType">
+                    <!-- Default options -->
                     <option value="pdf">PDF</option>
                     <option value="docx">Word</option>
                     <option value="img">Image</option>
+                    <option value="html">HTML</option>
+                    <option value="pptx">PowerPoint</option>
                 </select>
             </div>
-            
+        
             <div class="form-group">
                 <label>Language:</label>
                 <select id="language">
+                    <!-- Default options -->
                     <option value="en">English</option>
                     <option value="zh-cn">Chinese</option>
                 </select>
@@ -38,27 +42,39 @@
 
     <script>
     document.addEventListener('DOMContentLoaded', async () => {
-        // Authentication check
-        const token = document.cookie.split('; ').find(row => row.startsWith('session_token='))?.split('=')[1];
-        if (!token) window.location.href = '/login';
-
         // Load current preferences
         try {
-            const response = await fetch('/profile', {
-                headers: { 'Authorization': `Bearer ${token}` }
+            const response = await fetch('/profile/preferences', {
+                // headers: { 'Authorization': `Bearer ${token}` },
+                method: "GET",
+                credentials: 'include'
             });
             
             if (response.ok) {
                 const preferences = await response.json();
-                document.getElementById('fileType').value = preferences.file_type;
-                document.getElementById('language').value = preferences.language;
+                // document.getElementById('fileType').value =  preferences.file_type;
+                // document.getElementById('language').value = preferences.language;
+
+                // Set the file type preference
+                const fileTypeSelect = document.getElementById('fileType');
+                if (preferences.file_type) {
+                    fileTypeSelect.value = preferences.file_type.toLowerCase();
+                }
+
+                // Set the language preference
+                const languageSelect = document.getElementById('language');
+                if (preferences.language) {
+                    languageSelect.value = preferences.language.toLowerCase();
+                }
+                console.log(preferences.file_type, preferences.language)
             }
         } catch (error) {
             console.error('Error loading preferences:', error);
         }
+    });
 
-        // Save handler
-        document.getElementById('saveBtn').addEventListener('click', async () => {
+    // Save handler
+    document.getElementById('saveBtn').addEventListener('click', async () => {
             const data = {
                 file_type: document.getElementById('fileType').value,
                 language: document.getElementById('language').value
@@ -69,8 +85,8 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
                     },
+                    credentials: 'include',
                     body: JSON.stringify(data)
                 });
 
@@ -81,7 +97,6 @@
                 document.getElementById('message').textContent = 'Error saving preferences';
             }
         });
-    });
 
     // Logout handler
     document.getElementById('logoutBtn').addEventListener('click', async () => {
