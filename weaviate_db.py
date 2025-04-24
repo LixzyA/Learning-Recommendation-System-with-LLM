@@ -107,73 +107,91 @@ class Database:
         2.2 if the user haven't voted yet, create a new vote object in the vote collection and update the count in embeddings collection
         """
         # Check if object exist
-        response = self.collections.get(self.embeddings).query.fetch_objects(filters = wvc.query.Filter.by_property("obj_uuid").equal(obj_uuid))
+        response = self.collections.get(self.embeddings).query.fetch_object_by_id(obj_uuid)
         if not response:
             raise LookupError(f"No object found with UUID {obj_uuid}")
         
-        vote_response = self.collections.get(self.vote).query.fetch_objects(filters = (
-            wvc.query.Filter.all_of([
-                wvc.query.Filter.by_property("obj_uuid").equal((obj_uuid)),
-                wvc.query.Filter.by_property("user_id").equal(user_id)
-                ])
-            ))
-        # print(vote_response)
-        if vote_response.objects:
-            # Update vote type
-            existing_vote = vote_response.objects[0]
-            old_vote_type = existing_vote.properties['vote_type']
-            if old_vote_type == vote:
-                return (-1, -1)
-            self.collections.get(self.vote).data.update(uuid = existing_vote.uuid, properties = {"vote_type": vote, "vote_time": datetime.now("Asia/Chongqing")})
-        else:
-            self.collections.get(self.vote).data.insert({"obj_uuid": obj_uuid, "user_id": user_id, "vote_type": vote, "vote_time": datetime.now("Asia/Chongqing")})
+        vote_collection = self.collections.get(self.vote)
+        filters = (
+            wvc.query.Filter.by_property("obj_uuid").equal(obj_uuid) &
+            wvc.query.Filter.by_property("user_id").equal(user_id)
+        )
+        vote_response = vote_collection.query.fetch_objects(filters=filters, limit=1)
+        existing_vote = vote_response.objects[0] if vote_response.objects else None
 
-        response = response.objects[0]
-        upvote = response.properties['upvote']
-        downvote = response.properties['downvote']
+        if existing_vote:
+            old_vote = existing_vote.properties['vote_type']
+            if old_vote == vote:
+                return (-1, -1)  # No change needed
+            # Update existing vote
+            vote_collection.data.update(
+                uuid=existing_vote.uuid,
+                properties={
+                    "vote_type": vote,
+                    "vote_time": datetime.now(timezone("Asia/Chongqing"))
+                }
+            )
+            upvote = response.properties['upvote']
+            downvote = response.properties['downvote']
+            if old_vote == 'up':
+                upvote -= 1
+            else:
+                downvote -= 1
+
+        # if vote_response.objects:
+        #     # Update vote type
+        #     existing_vote = vote_response.objects[0]
+        #     old_vote_type = existing_vote.properties['vote_type']
+        #     if old_vote_type == vote:
+        #         return (-1, -1)
+        #     self.collections.get(self.vote).data.update(uuid = existing_vote.uuid, properties = {"vote_type": vote, "vote_time": datetime.now(timezone("Asia/Chongqing"))})
+        else:
+            vote_collection.data.insert(
+            properties={
+                "obj_uuid": obj_uuid,
+                "user_id": user_id,
+                "vote_type": vote,
+                "vote_time": datetime.now(timezone("Asia/Chongqing"))
+            }
+            )
+            upvote = response.properties['upvote']
+            downvote = response.properties['downvote']
+        
         if vote == 'up':
             upvote += 1
-            downvote -= 1
         else:
-            upvote -=1
             downvote += 1
         # Ensure counts don't go negative
         upvote = max(upvote, 0)
         downvote = max(downvote, 0)
-        self.collections.get(self.embeddings).data.update(uuid = response.uuid, properties = {"upvote": upvote, "downvote": downvote, "last_interaction": datetime.now("Asia/Chongqing")})
+        self.collections.get(self.embeddings).data.update(
+            uuid=obj_uuid,
+            properties={
+                "upvote": upvote,
+                "downvote": downvote,
+                "last_interaction": datetime.now(timezone("Asia/Chongqing"))
+            }
+        )
         return (upvote, downvote)
             
 
-    def search(self, query: str, query_embedding: list, property: dict | None, rerank: bool = False):
+    def search(self, query: str, query_embedding: list, property: dict | None, alpha: int = 0.7):
         """Search the current collection with a hybrid query."""
         if not query or not query.strip():
             raise ValueError("Query cannot be empty or whitespace.")
-        
-        if rerank:
-            result = self.collections.get(self.embeddings).query.hybrid(
-                query= query, vector=query_embedding, limit=5
-                # , filters = (
-                #     wvc.query.Filter.all_of([
-                #         wvc.query.Filter.by_property("file_type").equal(property["file_type"]),
-                #         wvc.query.Filter.by_property("language").equal(property['language'])
-                #         ]))
-                , rerank = Rerank(prop='content', query=query)
-                , alpha=0.5
-                , return_metadata=MetadataQuery(score=True)
-                )
-        else:
-            result = self.collections.get(self.embeddings).query.hybrid(
-                query= query, vector=query_embedding, limit=5
-                # , filters = (
-                #     wvc.query.Filter.all_of([
-                #         wvc.query.Filter.by_property("file_type").equal(property["file_type"]),
-                #         wvc.query.Filter.by_property("language").equal(property['language'])
-                #         ]))
-                , alpha=0.5
-                , return_metadata=MetadataQuery(score=True)
-                )
+        result = self.collections.get(self.embeddings).query.hybrid(
+            query= query, vector=query_embedding, limit=10
+            # , filters = (
+            #     wvc.query.Filter.all_of([
+            #         wvc.query.Filter.by_property("file_type").equal(property["file_type"]),
+            #         wvc.query.Filter.by_property("language").equal(property['language'])
+            #         ]))
+            , rerank = Rerank(prop='content', query=query)
+            , alpha=alpha
+            , return_metadata=MetadataQuery(score=True)
+            )
             
-            # 2. Identify objects needing decay processing
+        # 2. Identify objects needing decay processing
         threshold = 5
         decay_candidates = [
             obj.uuid for obj in result.objects
@@ -196,9 +214,9 @@ class Database:
                 net_votes = 0  # Ignore votes below threshold
 
             if total_votes > 5:
-                combined_score = 0.7 * obj.metadata.score + 0.3 * net_votes
+                combined_score = 0.7 * obj.metadata.rerank_score + 0.3 * net_votes
             else:
-                combined_score = obj.metadata.score  # Full weight to search relevance
+                combined_score = obj.metadata.rerank_score  # Full weight to search relevance
             
             ranked_results.append({
                 "object": obj,
