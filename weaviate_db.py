@@ -181,11 +181,11 @@ class Database:
             raise ValueError("Query cannot be empty or whitespace.")
         result = self.collections.get(self.embeddings).query.hybrid(
             query= query, vector=query_embedding, limit=10
-            # , filters = (
-            #     wvc.query.Filter.all_of([
-            #         wvc.query.Filter.by_property("file_type").equal(property["file_type"]),
-            #         wvc.query.Filter.by_property("language").equal(property['language'])
-            #         ]))
+            , filters = (
+                wvc.query.Filter.all_of([
+                    wvc.query.Filter.by_property("file_type").equal(property["file_type"]),
+                    wvc.query.Filter.by_property("language").equal(property['language'])
+                    ]))
             , rerank = Rerank(prop='content', query=query)
             , alpha=alpha
             , return_metadata=MetadataQuery(score=True)
