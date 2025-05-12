@@ -24,15 +24,16 @@ def load_dataset():
 
     return geeksforgeeks, pytorch_cn, pytorch, scikit, spv_dataset, tensorflow, tensorflow_cn, w3cschools, w3schools
 
-# Generate a hash for each content string
-def generate_hash(content):
-    return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
 async def preprocess_spv_dataset(df) -> pd.DataFrame:
     df['lang'] = df['lang'].str.lower()  # Normalize to lowercase
     df.loc[~df['lang'].isin(['en', 'zh-cn']), 'lang'] = 'zh-cn'
     df =df.rename(columns={"name":"title"})
     return df
+
+# Generate a hash for each content string
+def generate_hash(content):
+    return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
 async def preprocess_dataframe(df:pd.DataFrame, column_to_drop: list, lang:str = 'en', file_type:str='html'):
     """
@@ -73,8 +74,7 @@ def get_embeddings(df):
     all_chunk_texts = []
     content_indices = []
     
-    # Tokenize and chunk all content
-    print("Preprocessing content...")
+    print("Tokenizing content...")
     for idx, content in tqdm(enumerate(df['content']), total=len(df), desc="Tokenizing"):
         token_ids = tokenizer.encode(content, add_special_tokens=False)
         chunks = [token_ids[i:i + 126] for i in range(0, len(token_ids), 126)]
@@ -82,7 +82,7 @@ def get_embeddings(df):
         all_chunk_texts.extend(chunk_texts)
         content_indices.extend([idx] * len(chunk_texts))
 
-    batch_size = 32  # Adjust based on your GPU memory
+    batch_size = 32 
     all_embeddings = []
     
     print("Generating embeddings...")
