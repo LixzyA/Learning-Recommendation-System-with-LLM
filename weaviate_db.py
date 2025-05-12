@@ -138,13 +138,6 @@ class Database:
             else:
                 downvote -= 1
 
-        # if vote_response.objects:
-        #     # Update vote type
-        #     existing_vote = vote_response.objects[0]
-        #     old_vote_type = existing_vote.properties['vote_type']
-        #     if old_vote_type == vote:
-        #         return (-1, -1)
-        #     self.collections.get(self.vote).data.update(uuid = existing_vote.uuid, properties = {"vote_type": vote, "vote_time": datetime.now(timezone("Asia/Chongqing"))})
         else:
             vote_collection.data.insert(
             properties={
@@ -191,17 +184,17 @@ class Database:
             , return_metadata=MetadataQuery(score=True)
             )
             
-        # 2. Identify objects needing decay processing
+        # Identify objects needing decay processing
         threshold = 5
         decay_candidates = [
             obj.uuid for obj in result.objects
             if (obj.properties["upvote"] + obj.properties["downvote"]) > threshold
         ]
 
-        # 3. Batch fetch decayed scores for qualifying objects
+        # Batch fetch decayed scores for qualifying objects
         decayed_scores = self._batch_get_decayed_scores(decay_candidates) if decay_candidates else {}
 
-        # 4. Calculate final scores
+        # Calculate final scores
         ranked_results = []
         for obj in result.objects:
             total_votes = obj.properties["upvote"] + obj.properties["downvote"]
@@ -224,7 +217,6 @@ class Database:
                 "vote_used": total_votes > threshold
             })
 
-        # 5. Return top 5 results
         return sorted(ranked_results, key=lambda x: x["combined_score"], reverse=True)[:5]
 
     def _batch_get_decayed_scores(self, uuids: list) -> dict:
