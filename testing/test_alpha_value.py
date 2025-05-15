@@ -9,14 +9,14 @@ RESULTS_FILE = "results.json"
 BASE_URL = 'http://localhost:1234'
 LOGIN_ENDPOINT = '/login'
 RECOMMENDATION_ENDPOINT = '/recommendation'
-LOGIN_CREDENTIALS = {'username': 'prob', 'password': 'prob'}
+LOGIN_CREDENTIALS = {'username': 'felix', 'password': 'felix'}
 ALPHA_LIST = [0, 0.1, 0.3, 0.5, 0.7, 0.9, 1]
 REQUEST_HEADERS = {'Content-Type': 'application/json'}
 # Add a small delay between retries to avoid overwhelming the server
 RETRY_DELAY_SECONDS = 2
 # Rate limit settings
 REQUESTS_BEFORE_SLEEP = 5
-SLEEP_DURATION_SECONDS = 60
+SLEEP_DURATION_SECONDS = 45
 # --- End Configuration ---
 
 def login(url, credentials, headers):
