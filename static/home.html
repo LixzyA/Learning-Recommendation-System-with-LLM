@@ -61,17 +61,17 @@ document.getElementById('searchBtn').addEventListener('click', async () => {
 
 function displayResults(results) {
     const container = document.getElementById('results');
-    recommendationList = results.results.objects
+    recommendationList = results.results
     console.log(recommendationList)
     container.innerHTML = recommendationList.slice(0, 3).map(result => `
     <div class="result-item">
-        <h3>${result.properties.name}</h3>
-        <p>Type: ${result.properties.file_type}</p>
-        <p>Language: ${result.properties.language}</p>
-        <p>URL: <a href="${result.properties?.url || '#'}" target="_blank">${result.properties?.url || 'None'}</a></p>
-        <p class="vote-count" data-id="${result.properties.obj_uuid}">Upvote: ${result.properties.upvote} Downvote: ${result.properties.downvote}</p>
-        <button onclick="vote('${result.properties.obj_uuid}', 'up')">Upvote</button>
-        <button onclick="vote('${result.properties.obj_uuid}', 'down')">Downvote</button>
+        <h3>${result.object.properties.name}</h3>
+        <p>Type: ${result.object.properties.file_type}</p>
+        <p>Language: ${result.object.properties.language}</p>
+        <p>URL: <a href="${result.object.properties?.url || '#'}" target="_blank">${result.object.properties?.url || 'None'}</a></p>
+        <p class="vote-count" data-id="${result.object.uuid}">Upvote: ${result.object.properties.upvote} Downvote: ${result.object.properties.downvote}</p>
+        <button onclick="vote('${result.object.uuid}', 'up')">Upvote</button>
+        <button onclick="vote('${result.object.uuid}', 'down')">Downvote</button>
     </div>
 `).join('');
 }

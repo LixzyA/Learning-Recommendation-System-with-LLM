@@ -24,7 +24,7 @@ class UserSession(Base):
 class Preference(Base):
     __tablename__ = "preferences"
     user_id = Column(Integer, ForeignKey("users.id"), primary_key=True)
-    file_type = Column(String, default="PDF")
-    language = Column(String, default="English")
+    file_type = Column(String, default="html")
+    language = Column(String, default="en")
 
 Base.metadata.create_all(bind=engine)

@@ -5,7 +5,7 @@ import torch
 from weaviate_db import Database
 from fastapi import FastAPI, Depends, Cookie, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from models import SessionLocal, User, UserSession, Preference
@@ -14,19 +14,14 @@ from security import *
 from pydantic import BaseModel
 from pathlib import Path
 from typing import Optional
-import json
 
 weaviate_db: Database | None = None
 _model: SentenceTransformer | None = None
-sql_db = None
-reranker_results = []
-no_reranker_results = []
+DEFAULT_ALPHA_VALUE = 0.3
 
 @asynccontextmanager
 async def lifespan(app:FastAPI):
     load_dotenv(dotenv_path=".env")
-    global sql_db
-    sql_db = SessionLocal()
     load_model()
 
     global weaviate_db
@@ -51,24 +46,20 @@ app.add_middleware(
 
 # Dependency
 def get_db():
-    global sql_db
-    if sql_db:
-        yield sql_db
-    else:
-        db = SessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
+    db = SessionLocal()  # Create a new session for each request
+    try:
+        yield db  # Yield the session to the caller
+    finally:
+        db.close()  # Ensure the session is closed after use
 
 def get_current_user(db: Session = Depends(get_db), token: str = Cookie(None, alias="session_token")):
     if not token:
-        return None
+        raise HTTPException(status_code=401, detail="Missing session token")
     user_id = validate_session(db, token)
     if not user_id:
-        return None
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
     return user_id
-
+    
 # Models
 class UserCreate(BaseModel):
     username: str
@@ -82,11 +73,13 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # GET request
 @app.get("/", response_class=HTMLResponse)
-async def get_page(user_id: Optional[int] = Depends(get_current_user)):
-    if user_id:
+async def get_page(request: Request, user_id: int = Depends(get_current_user)):
+    try:
         return FileResponse("static/home.html")
-    else:
-        return RedirectResponse("static/login.html", status_code=307)
+    except HTTPException as e:
+        if e.status_code == 401:
+            return FileResponse("static/login.html")
+        raise
 
 @app.get("/login", response_class=HTMLResponse)
 async def get_login_page(user_id: Optional[int] = Depends(get_current_user)):
@@ -111,10 +104,22 @@ async def get_home_page(user_id: int = Depends(get_current_user)):
 
 @app.get("/profile", response_class=HTMLResponse)
 async def get_profile_page(user_id: int = Depends(get_current_user)):
-    if user_id:
-        return FileResponse("static/profile.html")
-    else:
+    if not user_id:
         return RedirectResponse("static/login.html")
+    return FileResponse("static/profile.html")
+
+@app.get("/profile/preferences")
+async def get_profile_preferences(user_id: int = Depends(get_current_user), db: Session = Depends(get_db)):
+    try:
+        user_preferences = db.query(Preference).filter_by(user_id=user_id).first()
+        results = {
+            "file_type": user_preferences.file_type,
+            "language": user_preferences.language,
+            }
+        return results
+    except Exception as e:
+        raise HTTPException(400, e)
+
 
 # Static files handler
 @app.get("/static/{file_path:path}")
@@ -131,13 +136,29 @@ async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
     if not user or not verify_password(login_data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Incorrect credentials")
     
+
+    # In the login endpoint:
+    existing_sessions = db.query(UserSession).filter(UserSession.user_id == user.id).all()
+    for session in existing_sessions:
+        db.delete(session)
+    db.commit()  # Commit before creating the new session
+
     # Create new session
     session_token = create_session_token()
     new_session = UserSession(token=session_token, user_id=user.id)
     db.add(new_session)
     db.commit()
+    db.refresh(new_session)
     
-    return {"token": session_token}
+    response = JSONResponse(content={"token": session_token})
+    response.set_cookie(
+        key="session_token",
+        value=session_token,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    return response
 
 @app.post("/logout")
 async def logout(db: Session = Depends(get_db), user_id: Optional[int] = Depends(get_current_user)):
@@ -172,13 +193,27 @@ async def signup(user: UserCreate, db: Session = Depends(get_db)):
     db.add(new_session)
     db.commit()
     
-    return {"token": session_token}
+    response = JSONResponse(content={"token": session_token})
+    response.set_cookie(
+        key="session_token",
+        value=session_token,
+        httponly=True,
+        samesite="Lax"
+    )
+    return response
+
 
 @app.post("/recommendation")
-async def recomendation_page(request: Request, query: dict, user_id: Optional[int] = Depends(get_current_user)):
+async def recommendation_page(request: Request, payload: dict, user_id: Optional[int] = Depends(get_current_user)):
     global weaviate_db
 
-    query = query['input']
+    query = payload['input']
+    try:
+        alpha = float(payload.get('alpha', DEFAULT_ALPHA_VALUE)) 
+    except ValueError:
+        print(f"Invalid alpha value, using default {DEFAULT_ALPHA_VALUE}")
+        alpha = DEFAULT_ALPHA_VALUE
+
     if not user_id:
         return RedirectResponse(url="static/login.html", status_code=303)
 
@@ -186,73 +221,10 @@ async def recomendation_page(request: Request, query: dict, user_id: Optional[in
     try:
         query_embedding = model.encode(query).tolist()
         property = {"language": 'en', "file_type": "pdf"}
-        no_rerank_results = weaviate_db.search(query, query_embedding, property)
-        rerank_results = weaviate_db.search(query, query_embedding, property, rerank=True)
-
-        # For A/B testing
-
-        global no_reranker_results, reranker_results
-        no_rerank_formatted_results = []
-        for obj in no_rerank_results:
-            formatted_result = {
-                "name": obj['object'].properties.get('name'),
-                "language": obj['object'].properties.get('language'),
-                "file_type": obj['object'].properties.get('file_type'),
-                "last_interaction": obj['object'].properties.get('last_interaction').isoformat(),
-                "score": obj['object'].metadata.score,
-                "combined_score": obj.get('combined_score')
-            }
-            no_rerank_formatted_results.append(formatted_result)
-        # Create final JSON structure
-        no_rerank_query_entry = {
-            "query": query,
-            "results": no_rerank_formatted_results
-        }
-        no_reranker_results.append(no_rerank_query_entry)
-
-
-        rerank_formatted_results = []
-        for obj in rerank_results:            
-            formatted_result = {
-                "name": obj['object'].properties.get('name'),
-                "language": obj['object'].properties.get('language'),
-                "file_type": obj['object'].properties.get('file_type'),
-                "last_interaction": obj['object'].properties.get('last_interaction').isoformat(),
-                "score": obj['object'].metadata.score,
-                "rerank_score": obj['object'].metadata.rerank_score,
-                "combined_score": obj.get('combined_score'),
-            }
-            rerank_formatted_results.append(formatted_result)
-        # Create final JSON structure
-        rerank_query_entry = {
-            "query": query,
-            "results": rerank_formatted_results
-        }
-        reranker_results.append(rerank_query_entry)
-        
-        
-
-        return {"message": f"Searching for: {query}", "results": no_rerank_results}
+        results = weaviate_db.search(query, query_embedding, property, alpha)
+        return {"message": f"Searching for: {query}", "results": results}
     except ValueError:
         raise HTTPException(status_code=404, detail="Query cannot be empty or whitespace.")
-
-@app.get("/save")
-async def save():
-    """This function saves the result from reranker and non reranker test"""
-    rerank_file = "results/rerank.json"
-    no_rerank_file = "results/no_rerank.json"
-    global reranker_results, no_reranker_results
-    # Before opening the file, ensure the directory exists
-    makedirs('results', exist_ok=True)  # This creates the directory if it doesn't exist
-
-    with open(rerank_file, mode='w', encoding="utf-8") as f:
-        json.dump(reranker_results, f, ensure_ascii=False, indent=2)
-    with open(no_rerank_file, mode='w', encoding="utf-8") as f:
-        json.dump(no_reranker_results, f, ensure_ascii=False, indent=2)
-    reranker_results = []
-    no_reranker_results = []
-
-
 
 # Endpoint to handle voting
 @app.post("/vote/{result_id}")
@@ -279,6 +251,28 @@ async def vote(result_id: str, vote: str, request: Request, user_id: int = Depen
         "downvote": response[1], 
     }
 
+class UpdateModel(BaseModel):
+    file_type: str
+    language: str
+
+@app.post("/profile/update")
+def update_profile(preference: UpdateModel, db: Session = Depends(get_db), user_id: int = Depends(get_current_user)):
+    print(f"Preference is {preference}")
+    
+    if preference.file_type == None and preference.language == None:
+        return {"status_code": 400, "message": "Preference not found"}
+    
+    # Get user
+    user_to_update = db.query(Preference).filter_by(user_id=user_id).first()
+
+    if user_to_update:
+        user_to_update.language = preference.language
+        user_to_update.file_type = preference.file_type
+        db.commit()
+        return {"status_code": 200, "message": "Sucessfuly updated preference"}
+    else:
+        return {"status_code": 404, "message": "User not found"}
+
 def load_model():
     global _model
     if _model == None:
@@ -290,4 +284,4 @@ def load_model():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=1234, reload=True)
+    uvicorn.run("app:app", host="0.0.0.0", port=1234)
