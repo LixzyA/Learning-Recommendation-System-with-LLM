@@ -1,11 +1,10 @@
 from dotenv import load_dotenv
-from os import makedirs
 from sentence_transformers import SentenceTransformer
 import torch
 from weaviate_db import Database
 from fastapi import FastAPI, Depends, Cookie, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from models import SessionLocal, User, UserSession, Preference
@@ -17,7 +16,7 @@ from typing import Optional
 
 weaviate_db: Database | None = None
 _model: SentenceTransformer | None = None
-DEFAULT_ALPHA_VALUE = 0.3
+DEFAULT_ALPHA_VALUE = 0.7
 
 @asynccontextmanager
 async def lifespan(app:FastAPI):
@@ -54,10 +53,10 @@ def get_db():
 
 def get_current_user(db: Session = Depends(get_db), token: str = Cookie(None, alias="session_token")):
     if not token:
-        raise HTTPException(status_code=401, detail="Missing session token")
+        return None
     user_id = validate_session(db, token)
     if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid or expired session")
+        return None
     return user_id
     
 # Models
@@ -74,12 +73,10 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # GET request
 @app.get("/", response_class=HTMLResponse)
 async def get_page(request: Request, user_id: int = Depends(get_current_user)):
-    try:
-        return FileResponse("static/home.html")
-    except HTTPException as e:
-        if e.status_code == 401:
-            return FileResponse("static/login.html")
-        raise
+    if user_id:
+        return RedirectResponse("static/home.html")
+    else:
+        return FileResponse("static/login.html")
 
 @app.get("/login", response_class=HTMLResponse)
 async def get_login_page(user_id: Optional[int] = Depends(get_current_user)):
@@ -149,16 +146,8 @@ async def login(login_data: LoginRequest, db: Session = Depends(get_db)):
     db.add(new_session)
     db.commit()
     db.refresh(new_session)
-    
-    response = JSONResponse(content={"token": session_token})
-    response.set_cookie(
-        key="session_token",
-        value=session_token,
-        httponly=True,
-        samesite="lax",
-        path="/",
-    )
-    return response
+
+    return {"token": session_token}
 
 @app.post("/logout")
 async def logout(db: Session = Depends(get_db), user_id: Optional[int] = Depends(get_current_user)):
@@ -193,18 +182,10 @@ async def signup(user: UserCreate, db: Session = Depends(get_db)):
     db.add(new_session)
     db.commit()
     
-    response = JSONResponse(content={"token": session_token})
-    response.set_cookie(
-        key="session_token",
-        value=session_token,
-        httponly=True,
-        samesite="Lax"
-    )
-    return response
-
+    return {"token": session_token}
 
 @app.post("/recommendation")
-async def recommendation_page(request: Request, payload: dict, user_id: Optional[int] = Depends(get_current_user)):
+async def recommendation_page(request: Request, payload: dict, user_id: Optional[int] = Depends(get_current_user), db: Session = Depends(get_db)):
     global weaviate_db
 
     query = payload['input']
@@ -220,7 +201,9 @@ async def recommendation_page(request: Request, payload: dict, user_id: Optional
     model = load_model()
     try:
         query_embedding = model.encode(query).tolist()
-        property = {"language": 'en', "file_type": "pdf"}
+        # Get user preferences
+        user_preference = db.query(Preference).filter_by(user_id=user_id).first()
+        property = {"language": user_preference.language, "file_type": user_preference.file_type}
         results = weaviate_db.search(query, query_embedding, property, alpha)
         return {"message": f"Searching for: {query}", "results": results}
     except ValueError:
