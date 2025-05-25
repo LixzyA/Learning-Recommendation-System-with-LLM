@@ -144,5 +144,3 @@ pip install -r requirements.txt
 - Detailed API documentation (e.g., using Swagger/OpenAPI).
 
 ---
-
-This README provides a general overview. You'll want to fill in specific setup instructions based on your project's requirements (e.g., `requirements.txt`, detailed steps for setting up Weaviate locally if needed, etc.). 
