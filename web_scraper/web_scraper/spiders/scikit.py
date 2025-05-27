@@ -31,7 +31,7 @@ def clean_html_content(html_content):
     text = re.sub(r'[ \t]{2,}', ' ', text)  # Replace multiple spaces/tabs with one
     return text.strip()
 
-class WikipediaSpider(scrapy.Spider):
+class ScikitSpider(scrapy.Spider):
     name = "scikit"
     allowed_domains = ["scikit-learn.org"]
     start_urls = ["https://scikit-learn.org/stable/user_guide.html"]
