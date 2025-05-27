@@ -255,7 +255,7 @@ class Database:
 
 
 if __name__ == "__main__":
-    
+    # For testing purposes
     load_dotenv(dotenv_path=".env")
     embedding_collection = getenv("WEAVIATE_EMBEDDINGS")
     vote_collection = getenv("WEAVIATE_VOTE")
