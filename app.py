@@ -18,6 +18,19 @@ weaviate_db: Database | None = None
 _model: SentenceTransformer | None = None
 DEFAULT_ALPHA_VALUE = 0.7
 
+# Models
+class UserCreate(BaseModel):
+    username: str
+    password: str
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class UpdateModel(BaseModel):
+    file_type: str
+    language: str
+
 @asynccontextmanager
 async def lifespan(app:FastAPI):
     load_dotenv(dotenv_path=".env")
@@ -58,15 +71,6 @@ def get_current_user(db: Session = Depends(get_db), token: str = Cookie(None, al
     if not user_id:
         return None
     return user_id
-    
-# Models
-class UserCreate(BaseModel):
-    username: str
-    password: str
-
-class LoginRequest(BaseModel):
-    username: str
-    password: str
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -233,10 +237,6 @@ async def vote(result_id: str, vote: str, request: Request, user_id: int = Depen
         "upvote": response[0],
         "downvote": response[1], 
     }
-
-class UpdateModel(BaseModel):
-    file_type: str
-    language: str
 
 @app.post("/profile/update")
 def update_profile(preference: UpdateModel, db: Session = Depends(get_db), user_id: int = Depends(get_current_user)):
